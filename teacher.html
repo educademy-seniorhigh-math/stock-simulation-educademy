@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老師控制台 — 股市模擬</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, get, push, onValue, update, remove }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ── 請填入你的 Firebase 設定 ──────────────────────────────
+  const firebaseConfig = {
+    apiKey:            "AIzaSyBtuk86ocJRhgIWSsFqqsV7il1YcoTAs7Y",
+    authDomain:        "stock-simulation-educademy.firebaseapp.com",
+    databaseURL:       "https://stock-simulation-educademy-default-rtdb.firebaseio.com",
+    projectId:         "stock-simulation-educademy",
+    storageBucket:     "stock-simulation-educademy.firebasestorage.app",
+    messagingSenderId: "345388631283",
+    appId:             "1:345388631283:web:b0009591fa253de7252386",
+    measurementId:     "G-X5D3NFVFYS"
+  };
+  // ─────────────────────────────────────────────────────────
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  // ── 股票定義 ─────────────────────────────────────────────
+  const STOCKS = [
+    { id: "A", name: "新星科技", initPrice: 100, supply: 1000 },
+    { id: "B", name: "綠能電力", initPrice:  80, supply: 1200 },
+    { id: "C", name: "生醫創新", initPrice: 120, supply:  800 },
+  ];
+  const INIT_CASH   = 10000;
+  const TOTAL_ROUNDS = 6;
+
+  // ── 預設回合新聞劇本 ──────────────────────────────────────
+  const DEFAULT_NEWS = [
+    { title:"科技股利多！新星科技獲大廠訂單", body:"業界傳出新星科技獲得海外大廠大量訂單，預計下季營收大幅成長。市場信心增溫。", trend:{ A:0.15, B:0, C:0 } },
+    { title:"聯準會升息，市場震盪", body:"美國聯準會宣布升息一碼，全球股市普遍下跌。投資人開始觀望，資金流向保守標的。", trend:{ A:-0.08, B:-0.05, C:-0.12 } },
+    { title:"綠能政策加持！電動車補貼擴大", body:"政府宣布擴大電動車補貼，綠能電力受惠最深，市場預期訂單暴增。", trend:{ A:0, B:0.20, C:0.05 } },
+    { title:"生技新藥三期臨床試驗結果出爐", body:"生醫創新旗下新藥三期臨床試驗通過！股價強烈反應，創下近年新高。", trend:{ A:0, B:0, C:0.30 } },
+    { title:"全球供應鏈危機，原物料短缺", body:"國際原物料價格飆升，製造業成本壓力劇增，各大類股普遍受壓。", trend:{ A:-0.10, B:-0.15, C:-0.05 } },
+    { title:"【最終回合】年底財報季，市場總結算", body:"各公司財報陸續公布，市場進行年度總評價。最終排名即將揭曉，把握最後機會！", trend:{ A:0.05, B:0.08, C:0.10 } },
+  ];
+
+  // ── 全域狀態 ─────────────────────────────────────────────
+  let gameState  = null;
+  let playersMap = {};
+  let ordersMap  = {};
+  let unsubGame, unsubPlayers, unsubOrders;
+
+  // ── DOM ──────────────────────────────────────────────────
+  window.addEventListener("DOMContentLoaded", () => {
+    bindUI();
+    listenFirebase();
+  });
+
+  function bindUI() {
+    document.getElementById("btn-init").onclick    = initGame;
+    document.getElementById("btn-collect").onclick = collectOrders;
+    document.getElementById("btn-settle").onclick  = settleRound;
+    document.getElementById("btn-next").onclick    = nextRound;
+    document.getElementById("btn-end").onclick     = endGame;
+    document.getElementById("btn-reset").onclick   = resetGame;
+    document.getElementById("btn-add-news").onclick = addCustomNews;
+  }
+
+  function listenFirebase() {
+    onValue(ref(db, "game"), snap => {
+      gameState = snap.val();
+      renderGamePanel();
+    });
+    onValue(ref(db, "players"), snap => {
+      playersMap = snap.val() || {};
+      renderPlayers();
+      renderLeaderboard();
+    });
+    onValue(ref(db, "orders"), snap => {
+      ordersMap = snap.val() || {};
+      renderOrders();
+    });
+  }
+
+  // ── 初始化遊戲 ────────────────────────────────────────────
+  async function initGame() {
+    if (!confirm("確定要初始化遊戲？現有資料將全部清除。")) return;
+    const prices = {};
+    STOCKS.forEach(s => prices[s.id] = s.initPrice);
+    const state = {
+      phase: "waiting",   // waiting | ordering | settling | ended
+      round: 0,
+      totalRounds: TOTAL_ROUNDS,
+      prices,
+      priceHistory: {},   // round -> { A, B, C }
+      news: DEFAULT_NEWS[0],
+      kFactor: 0.3,
+      started: false,
+    };
+    await set(ref(db, "game"), state);
+    await set(ref(db, "orders"), null);
+    toast("遊戲已初始化！請讓學生登入並輸入姓名。");
+  }
+
+  // ── 開始收單 ──────────────────────────────────────────────
+  async function collectOrders() {
+    if (!gameState) return alert("請先初始化遊戲");
+    const round = gameState.round;
+    const news  = DEFAULT_NEWS[round] || gameState.news;
+    await update(ref(db, "game"), {
+      phase: "ordering",
+      started: true,
+      round,
+      news,
+    });
+    await set(ref(db, "orders"), null);
+    toast(`第 ${round + 1} 回合開始收單！`);
+  }
+
+  // ── 結算回合 ──────────────────────────────────────────────
+  async function settleRound() {
+    if (!gameState || gameState.phase !== "ordering") return alert("請先開始收單");
+    const round    = gameState.round;
+    const oldPrices = { ...gameState.prices };
+    const kFactor  = gameState.kFactor || 0.3;
+    const news     = DEFAULT_NEWS[round] || {};
+    const trend    = news.trend || {};
+
+    // 計算每支股票淨買入量
+    const netBuy = { A:0, B:0, C:0 };
+    Object.values(ordersMap || {}).forEach(order => {
+      STOCKS.forEach(s => {
+        netBuy[s.id] = (netBuy[s.id] || 0) + (order[`buy_${s.id}`] || 0) - (order[`sell_${s.id}`] || 0);
+      });
+    });
+
+    // 計算新股價：新股價 = 舊股價 * (1 + trend + 淨買入量/供給量 * K)
+    const newPrices = {};
+    STOCKS.forEach(s => {
+      const supplyEffect = (netBuy[s.id] / s.supply) * kFactor;
+      const trendEffect  = trend[s.id] || 0;
+      const ratio        = 1 + trendEffect + supplyEffect;
+      newPrices[s.id]    = Math.max(1, Math.round(oldPrices[s.id] * ratio * 100) / 100);
+    });
+
+    // 執行玩家訂單
+    const playerUpdates = {};
+    const orders = ordersMap || {};
+    for (const [uid, order] of Object.entries(orders)) {
+      const p = playersMap[uid];
+      if (!p) continue;
+      let cash    = p.cash || 0;
+      const stocks = { ...(p.stocks || {}) };
+      STOCKS.forEach(s => {
+        const buyQty  = order[`buy_${s.id}`]  || 0;
+        const sellQty = order[`sell_${s.id}`] || 0;
+        const cost    = buyQty  * oldPrices[s.id];
+        const income  = sellQty * oldPrices[s.id];
+        const holdQty = stocks[s.id] || 0;
+        const actualBuy  = (cash >= cost) ? buyQty  : Math.floor(cash / oldPrices[s.id]);
+        const actualSell = Math.min(sellQty, holdQty);
+        cash += actualSell * oldPrices[s.id] - actualBuy * oldPrices[s.id];
+        stocks[s.id] = (holdQty - actualSell + actualBuy);
+        cash = Math.max(0, Math.round(cash * 100) / 100);
+      });
+      // 計算總資產
+      let total = cash;
+      STOCKS.forEach(s => total += (stocks[s.id] || 0) * newPrices[s.id]);
+      // 記錄回合歷史
+      const history = p.history || {};
+      history[round] = { cash, stocks: { ...stocks }, total: Math.round(total * 100) / 100 };
+      playerUpdates[uid] = { ...p, cash, stocks, total: Math.round(total * 100) / 100, history };
+    }
+    // 更新沒下單的玩家總資產
+    for (const [uid, p] of Object.entries(playersMap)) {
+      if (playerUpdates[uid]) continue;
+      let total = p.cash || 0;
+      STOCKS.forEach(s => total += (p.stocks?.[s.id] || 0) * newPrices[s.id]);
+      const history = p.history || {};
+      history[round] = { cash: p.cash, stocks: p.stocks || {}, total: Math.round(total * 100) / 100 };
+      playerUpdates[uid] = { ...p, total: Math.round(total * 100) / 100, history };
+    }
+    // 記錄價格歷史
+    const priceHistory = { ...(gameState.priceHistory || {}) };
+    priceHistory[round] = { ...newPrices };
+
+    await update(ref(db, "players"), playerUpdates);
+    await update(ref(db, "game"), {
+      prices: newPrices,
+      priceHistory,
+      phase: "settled",
+      netBuy,
+      lastTrend: trend,
+    });
+    await set(ref(db, "orders"), null);
+    toast("結算完成！");
+  }
+
+  // ── 下一回合 ──────────────────────────────────────────────
+  async function nextRound() {
+    if (!gameState) return;
+    const nextR = (gameState.round || 0) + 1;
+    if (nextR >= TOTAL_ROUNDS) {
+      await update(ref(db, "game"), { phase: "ended" });
+      toast("遊戲結束！");
+      return;
+    }
+    await update(ref(db, "game"), { round: nextR, phase: "waiting", news: DEFAULT_NEWS[nextR] });
+    toast(`進入第 ${nextR + 1} 回合`);
+  }
+
+  async function endGame() {
+    await update(ref(db, "game"), { phase: "ended" });
+    toast("已結束遊戲");
+  }
+
+  async function resetGame() {
+    if (!confirm("確定全部重置？")) return;
+    await set(ref(db, "game"), null);
+    await set(ref(db, "players"), null);
+    await set(ref(db, "orders"), null);
+    toast("已重置");
+  }
+
+  async function addCustomNews() {
+    const title = document.getElementById("news-title").value.trim();
+    const body  = document.getElementById("news-body").value.trim();
+    const tA    = parseFloat(document.getElementById("trend-A").value) || 0;
+    const tB    = parseFloat(document.getElementById("trend-B").value) || 0;
+    const tC    = parseFloat(document.getElementById("trend-C").value) || 0;
+    if (!title) return alert("請輸入新聞標題");
+    await update(ref(db, "game"), {
+      news: { title, body, trend: { A: tA/100, B: tB/100, C: tC/100 } }
+    });
+    toast("新聞已更新！");
+  }
+
+  // ── 渲染 ──────────────────────────────────────────────────
+  function renderGamePanel() {
+    if (!gameState) return;
+    const round  = gameState.round || 0;
+    const phase  = gameState.phase || "waiting";
+    const prices = gameState.prices || {};
+
+    document.getElementById("info-round").textContent  = `${round + 1} / ${TOTAL_ROUNDS}`;
+    document.getElementById("info-phase").textContent  = phaseLabel(phase);
+    document.getElementById("info-phase").className    = "phase-badge phase-" + phase;
+
+    // 股價顯示
+    const priceHTML = STOCKS.map(s => {
+      const p    = prices[s.id] || s.initPrice;
+      const hist = gameState.priceHistory || {};
+      const prev = round > 0 ? (hist[round - 1]?.[s.id] || s.initPrice) : s.initPrice;
+      const chg  = ((p - prev) / prev * 100).toFixed(1);
+      const up   = p >= prev;
+      return `<div class="price-card ${up ? "up" : "dn"}">
+        <div class="stock-id">${s.id}</div>
+        <div class="stock-name">${s.name}</div>
+        <div class="stock-price">$${p.toFixed(0)}</div>
+        <div class="stock-chg">${up ? "▲" : "▼"} ${Math.abs(chg)}%</div>
+      </div>`;
+    }).join("");
+    document.getElementById("price-panel").innerHTML = priceHTML;
+
+    // 新聞
+    const news = gameState.news || {};
+    document.getElementById("cur-news-title").textContent = news.title || "—";
+    document.getElementById("cur-news-body").textContent  = news.body  || "";
+
+    // 按鈕狀態
+    document.getElementById("btn-collect").disabled = (phase !== "waiting");
+    document.getElementById("btn-settle").disabled  = (phase !== "ordering");
+    document.getElementById("btn-next").disabled    = (phase !== "settled") || round >= TOTAL_ROUNDS - 1;
+    document.getElementById("btn-end").disabled     = (phase === "ended");
+
+    // 淨買入
+    if (gameState.netBuy) {
+      const nb = gameState.netBuy;
+      document.getElementById("net-buy-info").innerHTML =
+        STOCKS.map(s => `<span class="nb ${nb[s.id] >= 0 ? 'up' : 'dn'}">${s.id}: ${nb[s.id] >= 0 ? '+' : ''}${nb[s.id]}</span>`).join(" ");
+    }
+  }
+
+  function renderPlayers() {
+    const list   = Object.entries(playersMap);
+    const count  = list.length;
+    document.getElementById("player-count").textContent = count;
+    const rows = list.map(([uid, p]) => {
+      const total = p.total || p.cash || INIT_CASH;
+      const pct   = ((total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
+      const stocks = STOCKS.map(s => `${s.id}:${p.stocks?.[s.id] || 0}`).join(" ");
+      return `<tr>
+        <td>${p.name || uid.slice(0,6)}</td>
+        <td>$${(p.cash || 0).toFixed(0)}</td>
+        <td class="mono">${stocks}</td>
+        <td class="${total >= INIT_CASH ? 'up' : 'dn'}">$${total.toFixed(0)} (${pct}%)</td>
+      </tr>`;
+    }).join("");
+    document.getElementById("player-tbody").innerHTML = rows || "<tr><td colspan='4' style='text-align:center;color:#666'>尚無學生登入</td></tr>";
+  }
+
+  function renderOrders() {
+    const list = Object.entries(ordersMap || {});
+    document.getElementById("order-count").textContent = list.length;
+    const rows = list.map(([uid, o]) => {
+      const name = playersMap[uid]?.name || uid.slice(0, 6);
+      const buys  = STOCKS.map(s => o[`buy_${s.id}`]  ? `買${s.id}×${o[`buy_${s.id}`]}`  : "").filter(Boolean).join(" ");
+      const sells = STOCKS.map(s => o[`sell_${s.id}`] ? `賣${s.id}×${o[`sell_${s.id}`]}` : "").filter(Boolean).join(" ");
+      return `<tr><td>${name}</td><td class="up">${buys || "—"}</td><td class="dn">${sells || "—"}</td></tr>`;
+    }).join("");
+    document.getElementById("order-tbody").innerHTML = rows || "<tr><td colspan='3' style='text-align:center;color:#666'>尚無訂單</td></tr>";
+  }
+
+  function renderLeaderboard() {
+    const sorted = Object.entries(playersMap)
+      .map(([uid, p]) => ({ name: p.name || uid.slice(0,6), total: p.total || p.cash || INIT_CASH }))
+      .sort((a, b) => b.total - a.total);
+    const medals = ["🥇","🥈","🥉"];
+    const rows = sorted.map((p, i) => {
+      const pct = ((p.total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
+      return `<div class="lb-row ${p.total >= INIT_CASH ? 'up' : 'dn'}">
+        <span class="lb-rank">${medals[i] || (i + 1)}</span>
+        <span class="lb-name">${p.name}</span>
+        <span class="lb-total">$${p.total.toFixed(0)}</span>
+        <span class="lb-pct">${p.total >= INIT_CASH ? '+' : ''}${pct}%</span>
+      </div>`;
+    }).join("");
+    document.getElementById("leaderboard").innerHTML = rows || "<p style='color:#666;text-align:center'>尚無資料</p>";
+  }
+
+  function phaseLabel(p) {
+    return { waiting:"等待中", ordering:"收單中", settled:"已結算", ended:"遊戲結束" }[p] || p;
+  }
+
+  function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;
+  --gold:#d29922;--blue:#58a6ff;--accent:#1f6feb;
+}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh}
+.mono{font-family:'DM Mono',monospace}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{font-size:16px;font-weight:700;color:var(--gold);display:flex;align-items:center;gap:8px}
+.logo::before{content:"📊"}
+.status-bar{display:flex;gap:16px;align-items:center}
+.phase-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.05em;font-family:'DM Mono',monospace}
+.phase-waiting{background:#1f2d1a;color:#3fb950;border:1px solid #238636}
+.phase-ordering{background:#2d1f07;color:var(--gold);border:1px solid #9e6a03}
+.phase-settled{background:#1a1f2d;color:var(--blue);border:1px solid #1f6feb}
+.phase-ended{background:#2d1a1a;color:var(--red);border:1px solid #6e2626}
+.main{display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 49px)}
+.left{padding:20px;border-right:1px solid var(--border);overflow-y:auto}
+.right{padding:20px;overflow-y:auto;background:var(--surface)}
+section{margin-bottom:24px}
+h2{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px;font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px}
+h2::before{content:'';display:inline-block;width:3px;height:13px;background:var(--gold);border-radius:2px}
+.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.price-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;transition:border-color .2s}
+.price-card.up{border-color:#238636}
+.price-card.dn{border-color:#6e2626}
+.stock-id{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:2px}
+.stock-name{font-size:12px;color:var(--muted);margin-bottom:6px}
+.stock-price{font-size:22px;font-weight:700;font-family:'DM Mono',monospace}
+.stock-chg{font-size:12px;font-weight:600;margin-top:2px}
+.price-card.up .stock-price,.price-card.up .stock-chg{color:var(--green)}
+.price-card.dn .stock-price,.price-card.dn .stock-chg{color:var(--red)}
+.news-box{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:6px;padding:14px 16px;margin-bottom:12px}
+.news-title{font-size:14px;font-weight:700;color:var(--gold);margin-bottom:6px}
+.news-body{font-size:13px;color:var(--muted);line-height:1.6}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+button{font-size:13px;padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .15s}
+button:hover:not(:disabled){background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.3;cursor:default}
+.btn-green{background:#238636;border-color:#2ea043;color:#fff}
+.btn-green:hover:not(:disabled){background:#2ea043}
+.btn-red{background:#6e2626;border-color:#f85149;color:var(--red)}
+.btn-red:hover:not(:disabled){background:#b91c1c;color:#fff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:6px 10px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;font-family:'DM Mono',monospace}
+td{padding:7px 10px;border-bottom:1px solid rgba(48,54,61,.5)}
+tr:last-child td{border-bottom:none}
+.up{color:var(--green)}
+.dn{color:var(--red)}
+.lb-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;margin-bottom:4px;background:var(--surface2);border:1px solid var(--border)}
+.lb-rank{font-size:16px;min-width:28px}
+.lb-name{flex:1;font-weight:500}
+.lb-total{font-family:'DM Mono',monospace;font-size:13px;font-weight:600}
+.lb-pct{font-size:12px;font-weight:600;min-width:56px;text-align:right}
+.lb-row.up .lb-total,.lb-row.up .lb-pct{color:var(--green)}
+.lb-row.dn .lb-total,.lb-row.dn .lb-pct{color:var(--red)}
+.form-group{margin-bottom:10px}
+.form-group label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;font-family:'DM Mono',monospace}
+.form-group input,.form-group textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;font-family:'Noto Sans TC',sans-serif}
+.form-group textarea{resize:vertical;min-height:60px}
+.form-group input:focus,.form-group textarea:focus{outline:none;border-color:var(--accent)}
+.trend-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface2);border:1px solid var(--border);font-family:'DM Mono',monospace}
+.nb{margin-right:8px;font-family:'DM Mono',monospace;font-size:12px}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#1f6feb;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;z-index:999}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:800px){.main{grid-template-columns:1fr}.left,.right{padding:14px}.price-grid{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">股市模擬 — 老師控制台</div>
+  <div class="status-bar">
+    <span style="color:var(--muted);font-size:12px">回合</span>
+    <span id="info-round" class="mono" style="font-weight:700;color:var(--gold)">—</span>
+    <span id="info-phase" class="phase-badge phase-waiting">等待中</span>
+    <span style="color:var(--muted);font-size:12px">學生</span>
+    <span id="player-count" class="mono" style="color:var(--blue);font-weight:700">0</span>
+  </div>
+</header>
+
+<div class="main">
+  <!-- ── 左側主控區 ── -->
+  <div class="left">
+
+    <section>
+      <h2>股價即時大盤</h2>
+      <div class="price-grid" id="price-panel">
+        <div class="price-card"><div class="stock-id">—</div><div class="stock-name">載入中</div><div class="stock-price">—</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">淨買入量：<span id="net-buy-info">—</span></div>
+    </section>
+
+    <section>
+      <h2>當前回合新聞</h2>
+      <div class="news-box">
+        <div class="news-title" id="cur-news-title">尚未設定</div>
+        <div class="news-body" id="cur-news-body"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>回合控制</h2>
+      <div class="btn-row">
+        <button id="btn-init">🔧 初始化遊戲</button>
+        <button id="btn-collect" class="btn-green" disabled>▶ 開始收單</button>
+        <button id="btn-settle" class="btn-green" disabled>⚡ 結算回合</button>
+        <button id="btn-next" disabled>⏭ 下一回合</button>
+        <button id="btn-end">⏹ 結束遊戲</button>
+        <button id="btn-reset" class="btn-red">♻ 全部重置</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>訂單收集 <span class="badge" id="order-count">0</span> 筆</h2>
+      <table>
+        <thead><tr><th>學生</th><th>買入</th><th>賣出</th></tr></thead>
+        <tbody id="order-tbody"><tr><td colspan="3" style="text-align:center;color:#666">尚無訂單</td></tr></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>自訂新聞（進階）</h2>
+      <div class="form-group">
+        <label>新聞標題</label>
+        <input type="text" id="news-title" placeholder="輸入新聞標題...">
+      </div>
+      <div class="form-group">
+        <label>新聞內容</label>
+        <textarea id="news-body" placeholder="輸入詳細內容..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>基準漲跌幅（%）</label>
+        <div class="trend-row">
+          <input type="number" id="trend-A" placeholder="A 新星科技" step="1">
+          <input type="number" id="trend-B" placeholder="B 綠能電力" step="1">
+          <input type="number" id="trend-C" placeholder="C 生醫創新" step="1">
+        </div>
+      </div>
+      <button id="btn-add-news">發布自訂新聞</button>
+    </section>
+
+  </div>
+
+  <!-- ── 右側：學生列表 + 排行榜 ── -->
+  <div class="right">
+
+    <section>
+      <h2>排行榜</h2>
+      <div id="leaderboard"><p style="color:#666;text-align:center">尚無資料</p></div>
+    </section>
+
+    <section>
+      <h2>學生資產列表</h2>
+      <table>
+        <thead><tr><th>姓名</th><th>現金</th><th>持股</th><th>總資產</th></tr></thead>
+        <tbody id="player-tbody"><tr><td colspan="4" style="text-align:center;color:#666">尚無學生</td></tr></tbody>
+      </table>
+    </section>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+</body>
+</html>

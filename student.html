@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>股市模擬 — 學生交易</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, get, push, onValue, update }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ── 請填入與老師頁面相同的 Firebase 設定 ─────────────────
+  const firebaseConfig = {
+    apiKey:            "AIzaSyBtuk86ocJRhgIWSsFqqsV7il1YcoTAs7Y",
+    authDomain:        "stock-simulation-educademy.firebaseapp.com",
+    databaseURL:       "https://stock-simulation-educademy-default-rtdb.firebaseio.com",
+    projectId:         "stock-simulation-educademy",
+    storageBucket:     "stock-simulation-educademy.firebasestorage.app",
+    messagingSenderId: "345388631283",
+    appId:             "1:345388631283:web:b0009591fa253de7252386",
+    measurementId:     "G-X5D3NFVFYS"
+  };
+  // ─────────────────────────────────────────────────────────
+
+  const STOCKS     = [
+    { id:"A", name:"新星科技", initPrice:100, supply:1000 },
+    { id:"B", name:"綠能電力", initPrice:80,  supply:1200 },
+    { id:"C", name:"生醫創新", initPrice:120, supply:800  },
+  ];
+  const INIT_CASH  = 10000;
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  let uid       = localStorage.getItem("stock_uid");
+  let myName    = localStorage.getItem("stock_name");
+  let gameState = null;
+  let myData    = null;
+  let allPlayers = {};
+  let submitted  = false;
+
+  // ── 登入流程 ─────────────────────────────────────────────
+  window.addEventListener("DOMContentLoaded", () => {
+    if (!uid || !myName) {
+      showScreen("login");
+    } else {
+      document.getElementById("welcome-name").textContent = myName;
+      joinGame().then(() => {
+        showScreen("game");
+        listenFirebase();
+      });
+    }
+
+    document.getElementById("btn-login").onclick = async () => {
+      const nameInput = document.getElementById("input-name").value.trim();
+      if (!nameInput) return shake("input-name");
+      uid    = "p_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+      myName = nameInput;
+      localStorage.setItem("stock_uid",  uid);
+      localStorage.setItem("stock_name", myName);
+      document.getElementById("welcome-name").textContent = myName;
+      await joinGame();
+      showScreen("game");
+      listenFirebase();
+    };
+
+    document.getElementById("btn-submit").onclick = submitOrder;
+    document.getElementById("btn-clear").onclick  = clearOrder;
+    document.getElementById("btn-logout").onclick = () => {
+      localStorage.removeItem("stock_uid");
+      localStorage.removeItem("stock_name");
+      location.reload();
+    };
+
+    // 試算按鈕
+    document.querySelectorAll(".qty-input").forEach(inp => {
+      inp.addEventListener("input", calcPreview);
+    });
+  });
+
+  async function joinGame() {
+    const snap = await get(ref(db, `players/${uid}`));
+    if (!snap.exists()) {
+      const initStocks = {};
+      STOCKS.forEach(s => initStocks[s.id] = 0);
+      await set(ref(db, `players/${uid}`), {
+        name: myName,
+        cash: INIT_CASH,
+        stocks: initStocks,
+        total: INIT_CASH,
+        joinedAt: Date.now(),
+      });
+    }
+  }
+
+  function listenFirebase() {
+    onValue(ref(db, "game"), snap => {
+      gameState = snap.val();
+      renderGame();
+    });
+    onValue(ref(db, `players/${uid}`), snap => {
+      myData = snap.val();
+      renderMyAsset();
+      calcPreview();
+    });
+    onValue(ref(db, "players"), snap => {
+      allPlayers = snap.val() || {};
+      renderLeaderboard();
+    });
+  }
+
+  // ── 渲染主體 ─────────────────────────────────────────────
+  function renderGame() {
+    if (!gameState) return;
+    const phase  = gameState.phase || "waiting";
+    const round  = gameState.round || 0;
+    const prices = gameState.prices || {};
+    const news   = gameState.news   || {};
+
+    // 標題列
+    document.getElementById("g-round").textContent = `第 ${round + 1} / ${gameState.totalRounds || 6} 回合`;
+    document.getElementById("g-phase").textContent  = phaseLabel(phase);
+    document.getElementById("g-phase").className    = "phase-dot phase-" + phase;
+
+    // 新聞
+    document.getElementById("news-title").textContent = news.title || "等待老師發布新聞…";
+    document.getElementById("news-body").textContent  = news.body  || "";
+
+    // 股價卡片
+    const priceHistory = gameState.priceHistory || {};
+    const cards = STOCKS.map(s => {
+      const p    = prices[s.id] || s.initPrice;
+      const prev = round > 0 ? (priceHistory[round-1]?.[s.id] || s.initPrice) : s.initPrice;
+      const chg  = ((p - prev) / prev * 100).toFixed(1);
+      const up   = p >= prev;
+      const hold = myData?.stocks?.[s.id] || 0;
+      return `<div class="s-card ${up?"up":"dn"}">
+        <div class="s-top">
+          <span class="s-id">${s.id}</span>
+          <span class="s-name">${s.name}</span>
+        </div>
+        <div class="s-price mono">$${p.toFixed(0)}</div>
+        <div class="s-chg">${up?"▲":"▼"} ${Math.abs(chg)}%</div>
+        <div class="s-hold">持有 <strong>${hold}</strong> 股</div>
+      </div>`;
+    }).join("");
+    document.getElementById("price-cards").innerHTML = cards;
+
+    // 下單區
+    const canOrder = (phase === "ordering");
+    document.getElementById("order-section").style.display = canOrder ? "block" : "none";
+    document.getElementById("phase-msg").style.display     = canOrder ? "none"  : "block";
+    document.getElementById("phase-msg").textContent       = phaseMsgLabel(phase);
+    document.getElementById("btn-submit").disabled = submitted || !canOrder;
+
+    // 重置提交狀態（新回合）
+    if (phase === "waiting" || phase === "settling") submitted = false;
+
+    renderMyAsset();
+  }
+
+  function renderMyAsset() {
+    if (!myData) return;
+    const prices = gameState?.prices || {};
+    let total = myData.cash || 0;
+    STOCKS.forEach(s => total += (myData.stocks?.[s.id] || 0) * (prices[s.id] || s.initPrice));
+    const pct  = ((total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
+    const up   = total >= INIT_CASH;
+    document.getElementById("my-cash").textContent  = `$${(myData.cash || 0).toFixed(0)}`;
+    document.getElementById("my-total").textContent = `$${total.toFixed(0)}`;
+    document.getElementById("my-pct").textContent   = `${up ? "+" : ""}${pct}%`;
+    document.getElementById("my-pct").className     = up ? "pct up" : "pct dn";
+  }
+
+  function renderLeaderboard() {
+    const prices = gameState?.prices || {};
+    const sorted = Object.entries(allPlayers).map(([id, p]) => {
+      let total = p.cash || 0;
+      STOCKS.forEach(s => total += (p.stocks?.[s.id] || 0) * (prices[s.id] || s.initPrice));
+      return { name: p.name || id.slice(0,6), total, isMe: id === uid };
+    }).sort((a, b) => b.total - a.total);
+
+    const medals = ["🥇","🥈","🥉"];
+    const html = sorted.map((p, i) => {
+      const pct = ((p.total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
+      return `<div class="lb-row ${p.isMe ? "me" : ""} ${p.total >= INIT_CASH ? "up" : "dn"}">
+        <span class="lb-rank">${medals[i] || (i + 1)}</span>
+        <span class="lb-name">${p.name}${p.isMe ? " ✦" : ""}</span>
+        <span class="lb-val mono">$${p.total.toFixed(0)}</span>
+        <span class="lb-pct">${p.total >= INIT_CASH ? "+" : ""}${pct}%</span>
+      </div>`;
+    }).join("");
+    document.getElementById("leaderboard").innerHTML = html || "<p style='text-align:center;color:#666'>載入中…</p>";
+  }
+
+  // ── 試算預覽 ─────────────────────────────────────────────
+  function calcPreview() {
+    if (!myData || !gameState) return;
+    const prices = gameState.prices || {};
+    let cashLeft = myData.cash || 0;
+    let previewHTML = "";
+    STOCKS.forEach(s => {
+      const buyQty  = parseInt(document.getElementById(`buy_${s.id}`)?.value  || 0) || 0;
+      const sellQty = parseInt(document.getElementById(`sell_${s.id}`)?.value || 0) || 0;
+      const p = prices[s.id] || s.initPrice;
+      cashLeft += sellQty * p - buyQty * p;
+    });
+    document.getElementById("preview-cash").textContent = `$${Math.max(0, cashLeft.toFixed(0))}`;
+    document.getElementById("preview-cash").className   = cashLeft >= 0 ? "mono up" : "mono dn";
+  }
+
+  // ── 送出訂單 ─────────────────────────────────────────────
+  async function submitOrder() {
+    if (!gameState || gameState.phase !== "ordering") return;
+    const order = { submittedAt: Date.now() };
+    let totalCost = 0;
+    const prices = gameState.prices || {};
+    STOCKS.forEach(s => {
+      const buyQty  = parseInt(document.getElementById(`buy_${s.id}`)?.value  || 0) || 0;
+      const sellQty = parseInt(document.getElementById(`sell_${s.id}`)?.value || 0) || 0;
+      order[`buy_${s.id}`]  = buyQty;
+      order[`sell_${s.id}`] = sellQty;
+      totalCost += buyQty * (prices[s.id] || s.initPrice);
+    });
+    if (totalCost > (myData?.cash || 0)) {
+      toast("現金不足，無法完成買入！", "error");
+      return;
+    }
+    await set(ref(db, `orders/${uid}`), order);
+    submitted = true;
+    document.getElementById("btn-submit").disabled = true;
+    toast("訂單已送出！等待老師結算 ✦");
+  }
+
+  function clearOrder() {
+    document.querySelectorAll(".qty-input").forEach(el => el.value = "");
+    calcPreview();
+  }
+
+  // ── 工具 ─────────────────────────────────────────────────
+  function showScreen(id) {
+    document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+    document.getElementById("s-" + id).style.display = "block";
+  }
+  function phaseLabel(p) {
+    return { waiting:"等待中", ordering:"收單中", settled:"已結算", ended:"遊戲結束" }[p] || p;
+  }
+  function phaseMsgLabel(p) {
+    return {
+      waiting:"⏳ 等待老師開始這回合…",
+      settled:"✅ 本回合已結算，等待下一回合",
+      ended:  "🎉 遊戲結束！請看排行榜",
+    }[p] || "";
+  }
+  function shake(id) {
+    const el = document.getElementById(id);
+    el.style.animation = "shake .3s";
+    setTimeout(() => el.style.animation = "", 400);
+  }
+  function toast(msg, type="ok") {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className   = "show " + type;
+    setTimeout(() => t.className = "", 2800);
+  }
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#22263a;--border:#2e3347;
+  --text:#e8ecf4;--muted:#7a82a0;--green:#34d58a;--red:#f0614e;
+  --gold:#f0b942;--blue:#5b9cf6;--accent:#3d5cf5;
+}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;max-width:480px;margin:0 auto}
+.mono{font-family:'DM Mono',monospace}
+.screen{display:none}
+
+/* ── 登入 ── */
+#s-login{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center}
+.login-logo{font-size:48px;margin-bottom:16px}
+.login-title{font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px}
+.login-sub{font-size:14px;color:var(--muted);margin-bottom:32px}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:340px}
+.login-card input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:16px;font-family:'Noto Sans TC',sans-serif;text-align:center;margin-bottom:12px;outline:none}
+.login-card input:focus{border-color:var(--accent)}
+.btn-login{width:100%;background:var(--accent);border:none;border-radius:10px;padding:14px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:background .15s}
+.btn-login:hover{background:#5068ff}
+
+/* ── 遊戲主體 ── */
+#s-game{padding-bottom:80px}
+.top-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.top-name{font-weight:700;color:var(--gold);font-size:14px}
+.top-right{display:flex;align-items:center;gap:10px}
+.phase-dot{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;font-family:'DM Mono',monospace}
+.phase-dot.phase-waiting{background:rgba(52,213,138,.12);color:var(--green);border:1px solid rgba(52,213,138,.3)}
+.phase-dot.phase-ordering{background:rgba(240,185,66,.12);color:var(--gold);border:1px solid rgba(240,185,66,.3)}
+.phase-dot.phase-settled{background:rgba(91,156,246,.12);color:var(--blue);border:1px solid rgba(91,156,246,.3)}
+.phase-dot.phase-ended{background:rgba(240,97,78,.12);color:var(--red);border:1px solid rgba(240,97,78,.3)}
+.btn-sm{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--muted);font-size:11px;cursor:pointer;font-family:'Noto Sans TC',sans-serif}
+
+/* ── 我的資產卡 ── */
+.asset-card{margin:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);border:1px solid var(--border);border-radius:16px;padding:18px}
+.asset-label{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-family:'DM Mono',monospace;margin-bottom:4px}
+.asset-total{font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);line-height:1}
+.pct{font-size:14px;font-weight:600;margin-top:4px}
+.up{color:var(--green)}
+.dn{color:var(--red)}
+.asset-row{display:flex;gap:0;margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
+.asset-item{flex:1;text-align:center}
+.asset-item+.asset-item{border-left:1px solid var(--border)}
+.a-label{font-size:11px;color:var(--muted);margin-bottom:4px}
+.a-val{font-size:15px;font-weight:600;font-family:'DM Mono',monospace}
+
+/* ── 新聞 ── */
+.news-wrap{margin:0 14px 14px}
+.news-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:12px;padding:14px 16px}
+.news-tag{font-size:10px;font-weight:700;color:var(--gold);letter-spacing:.1em;text-transform:uppercase;font-family:'DM Mono',monospace;margin-bottom:6px}
+.news-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1.4}
+.news-body{font-size:12px;color:var(--muted);line-height:1.6}
+
+/* ── 股價卡片 ── */
+.section-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;padding:0 14px 8px;font-family:'DM Mono',monospace}
+.price-scroll{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 14px 14px}
+.s-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center;transition:border-color .2s}
+.s-card.up{border-color:rgba(52,213,138,.4)}
+.s-card.dn{border-color:rgba(240,97,78,.4)}
+.s-top{display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:6px}
+.s-id{font-family:'DM Mono',monospace;font-size:11px;font-weight:700;background:var(--surface2);padding:1px 6px;border-radius:4px}
+.s-name{font-size:10px;color:var(--muted)}
+.s-price{font-size:20px;font-weight:700}
+.s-chg{font-size:11px;font-weight:600;margin-top:2px}
+.s-hold{font-size:11px;color:var(--muted);margin-top:4px}
+.s-card.up .s-price,.s-card.up .s-chg{color:var(--green)}
+.s-card.dn .s-price,.s-card.dn .s-chg{color:var(--red)}
+
+/* ── 下單區 ── */
+#order-section{margin:0 14px 14px}
+#phase-msg{text-align:center;padding:16px;color:var(--muted);font-size:13px;margin:0 14px 14px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.order-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px}
+.order-stock-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.order-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.order-col label{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-family:'DM Mono',monospace;margin-bottom:4px}
+.order-col input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:16px;font-family:'DM Mono',monospace;text-align:center;outline:none;-webkit-appearance:none}
+.order-col input:focus{border-color:var(--accent)}
+.order-col.buy input:focus{border-color:var(--green)}
+.order-col.sell input:focus{border-color:var(--red)}
+.order-col.buy label{color:var(--green)}
+.order-col.sell label{color:var(--red)}
+.preview-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border-radius:10px;margin-bottom:12px;font-size:13px}
+.btn-row{display:flex;gap:8px}
+.btn-main{flex:1;background:var(--accent);border:none;border-radius:10px;padding:14px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:background .15s}
+.btn-main:hover:not(:disabled){background:#5068ff}
+.btn-main:disabled{opacity:.35;cursor:default}
+.btn-clear{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 20px;color:var(--muted);font-size:14px;cursor:pointer;font-family:'Noto Sans TC',sans-serif}
+
+/* ── 排行榜 ── */
+.lb-wrap{padding:0 14px 14px}
+.lb-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;margin-bottom:6px;background:var(--surface);border:1px solid var(--border);transition:border-color .2s}
+.lb-row.me{border-color:var(--accent);background:rgba(61,92,245,.08)}
+.lb-row.up .lb-val,.lb-row.up .lb-pct{color:var(--green)}
+.lb-row.dn .lb-val,.lb-row.dn .lb-pct{color:var(--red)}
+.lb-rank{font-size:18px;min-width:28px}
+.lb-name{flex:1;font-size:13px;font-weight:500}
+.lb-val{font-size:13px;font-weight:600}
+.lb-pct{font-size:12px;min-width:54px;text-align:right}
+
+/* ── 底部導航 ── */
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--surface);border-top:1px solid var(--border);display:flex;z-index:50}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0;cursor:pointer;border:none;background:none;color:var(--muted);font-size:10px;font-family:'Noto Sans TC',sans-serif;gap:3px;transition:color .15s}
+.nav-btn.active,.nav-btn:hover{color:var(--gold)}
+.nav-icon{font-size:20px}
+
+/* ── Tab 切換 ── */
+.tab-panel{display:none;padding-top:4px}
+.tab-panel.active{display:block}
+
+/* ── 數學洞察 ── */
+.insight-card{margin:0 14px 14px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;padding:16px}
+.insight-tag{font-size:10px;font-weight:700;color:var(--blue);letter-spacing:.1em;text-transform:uppercase;font-family:'DM Mono',monospace;margin-bottom:8px}
+.insight-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px}
+.insight-body{font-size:12px;color:var(--muted);line-height:1.7}
+.formula-box{background:var(--surface2);border-radius:8px;padding:10px 12px;margin:10px 0;font-family:'DM Mono',monospace;font-size:12px;color:var(--blue)}
+
+/* ── Toast ── */
+#toast{position:fixed;top:60px;left:50%;transform:translateX(-50%) translateY(-20px);background:var(--accent);color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;z-index:999;white-space:nowrap}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.show.error{background:var(--red)}
+
+/* ── 動畫 ── */
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+</style>
+</head>
+<body>
+
+<!-- ── 登入畫面 ── -->
+<div class="screen" id="s-login" style="display:flex">
+  <div class="login-logo">📈</div>
+  <div class="login-title">股市模擬交易</div>
+  <div class="login-sub">輸入你的名字，開始體驗真實的股市！</div>
+  <div class="login-card">
+    <input type="text" id="input-name" placeholder="輸入你的名字…" maxlength="10" autofocus>
+    <button class="btn-login" id="btn-login">進入市場 →</button>
+  </div>
+</div>
+
+<!-- ── 遊戲主畫面 ── -->
+<div class="screen" id="s-game">
+  <!-- 頂部 -->
+  <div class="top-bar">
+    <div class="top-name" id="welcome-name">—</div>
+    <div class="top-right">
+      <span id="g-round" style="font-size:12px;color:var(--muted)" class="mono">—</span>
+      <span id="g-phase" class="phase-dot phase-waiting">等待中</span>
+      <button class="btn-sm" id="btn-logout">登出</button>
+    </div>
+  </div>
+
+  <!-- Tab 面板切換 -->
+  <div id="tab-market" class="tab-panel active">
+    <!-- 資產卡 -->
+    <div class="asset-card">
+      <div class="asset-label">我的總資產</div>
+      <div class="asset-total mono" id="my-total">$10,000</div>
+      <div class="pct" id="my-pct">+0.0%</div>
+      <div class="asset-row">
+        <div class="asset-item">
+          <div class="a-label">現金</div>
+          <div class="a-val" id="my-cash">$10,000</div>
+        </div>
+        <div class="asset-item">
+          <div class="a-label">下單後現金預估</div>
+          <div class="a-val" id="preview-cash">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新聞 -->
+    <div class="news-wrap">
+      <div class="news-card">
+        <div class="news-tag">📡 市場新聞</div>
+        <div class="news-title" id="news-title">等待老師發布新聞…</div>
+        <div class="news-body" id="news-body"></div>
+      </div>
+    </div>
+
+    <!-- 股價 -->
+    <div class="section-title">即時股價</div>
+    <div class="price-scroll" id="price-cards">
+      <div class="s-card"><div class="s-price mono">…</div></div>
+    </div>
+
+    <!-- 下單 -->
+    <div class="section-title">下單交易</div>
+    <div id="phase-msg" style="display:none">⏳ 等待老師開始這回合…</div>
+    <div id="order-section" style="display:none">
+      <!-- 新星科技 -->
+      <div class="order-card">
+        <div class="order-stock-title"><span class="mono" style="background:var(--surface2);padding:2px 8px;border-radius:6px;font-size:12px">A</span>新星科技</div>
+        <div class="order-row">
+          <div class="order-col buy"><label>買入 (股)</label><input type="number" id="buy_A" class="qty-input" min="0" placeholder="0"></div>
+          <div class="order-col sell"><label>賣出 (股)</label><input type="number" id="sell_A" class="qty-input" min="0" placeholder="0"></div>
+        </div>
+      </div>
+      <!-- 綠能電力 -->
+      <div class="order-card">
+        <div class="order-stock-title"><span class="mono" style="background:var(--surface2);padding:2px 8px;border-radius:6px;font-size:12px">B</span>綠能電力</div>
+        <div class="order-row">
+          <div class="order-col buy"><label>買入 (股)</label><input type="number" id="buy_B" class="qty-input" min="0" placeholder="0"></div>
+          <div class="order-col sell"><label>賣出 (股)</label><input type="number" id="sell_B" class="qty-input" min="0" placeholder="0"></div>
+        </div>
+      </div>
+      <!-- 生醫創新 -->
+      <div class="order-card">
+        <div class="order-stock-title"><span class="mono" style="background:var(--surface2);padding:2px 8px;border-radius:6px;font-size:12px">C</span>生醫創新</div>
+        <div class="order-row">
+          <div class="order-col buy"><label>買入 (股)</label><input type="number" id="buy_C" class="qty-input" min="0" placeholder="0"></div>
+          <div class="order-col sell"><label>賣出 (股)</label><input type="number" id="sell_C" class="qty-input" min="0" placeholder="0"></div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-main" id="btn-submit">送出訂單</button>
+        <button class="btn-clear" id="btn-clear">清除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 排行榜 Tab -->
+  <div id="tab-rank" class="tab-panel">
+    <div class="asset-card" style="margin:14px">
+      <div class="asset-label">全班財富排行榜</div>
+    </div>
+    <div class="lb-wrap" id="leaderboard">
+      <p style="text-align:center;color:var(--muted)">載入中…</p>
+    </div>
+  </div>
+
+  <!-- 數學洞察 Tab -->
+  <div id="tab-math" class="tab-panel">
+    <div class="insight-card">
+      <div class="insight-tag">CONCEPT 01</div>
+      <div class="insight-title">等比數列</div>
+      <div class="insight-body">股票每天漲固定 %，就是在做「等比」——每天乘以同一個公比 r。</div>
+      <div class="formula-box">aₙ = a₁ × r^(n−1)<br>漲 10% 連 5 天：100 × 1.1⁵ = 161.05</div>
+      <div class="insight-body" style="color:var(--red);font-size:12px">⚠ 不是 100 + 10×5 = 150！</div>
+    </div>
+    <div class="insight-card">
+      <div class="insight-tag">CONCEPT 02</div>
+      <div class="insight-title">等比級數</div>
+      <div class="insight-body">每回合固定投入相同金額（定期定額），總資產是等比級數的和。</div>
+      <div class="formula-box">Sₙ = a₁(1−rⁿ) / (1−r)</div>
+      <div class="insight-body">複利的威力：愈早投入，最終資產差距愈大。</div>
+    </div>
+    <div class="insight-card">
+      <div class="insight-tag">CONCEPT 03</div>
+      <div class="insight-title">幾何平均數</div>
+      <div class="insight-body">計算多回合「真實平均報酬率」，不能用算術平均——</div>
+      <div class="formula-box">ⁿ√(r₁ × r₂ × … × rₙ) − 1</div>
+      <div class="insight-body" style="color:var(--red);font-size:12px">⚠ 漲 50% 再跌 50%：算術平均 = 0%，實際 = −25%！</div>
+    </div>
+  </div>
+
+  <!-- 底部導航 -->
+  <div class="bottom-nav">
+    <button class="nav-btn active" id="nav-market" onclick="switchTab('market',this)">
+      <span class="nav-icon">📊</span>大盤
+    </button>
+    <button class="nav-btn" id="nav-rank" onclick="switchTab('rank',this)">
+      <span class="nav-icon">🏆</span>排行榜
+    </button>
+    <button class="nav-btn" id="nav-math" onclick="switchTab('math',this)">
+      <span class="nav-icon">🧮</span>數學
+    </button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+function switchTab(name, btn) {
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("tab-" + name).classList.add("active");
+  btn.classList.add("active");
+}
+</script>
+</body>
+</html>
