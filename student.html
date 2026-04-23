@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>股市模擬 — 學生交易</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script type="module">
@@ -163,14 +163,60 @@
   function renderMyAsset() {
     if (!myData) return;
     const prices = gameState?.prices || {};
-    let total = myData.cash || 0;
-    STOCKS.forEach(s => total += (myData.stocks?.[s.id] || 0) * (prices[s.id] || s.initPrice));
-    const pct  = ((total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
-    const up   = total >= INIT_CASH;
-    document.getElementById("my-cash").textContent  = `$${(myData.cash || 0).toFixed(0)}`;
+    let stockValue = 0;
+    STOCKS.forEach(s => stockValue += (myData.stocks?.[s.id] || 0) * (prices[s.id] || s.initPrice));
+    const cash  = myData.cash || 0;
+    const total = cash + stockValue;
+    const pct   = ((total - INIT_CASH) / INIT_CASH * 100).toFixed(1);
+    const up    = total >= INIT_CASH;
+
+    // 主畫面資產卡
+    document.getElementById("my-cash").textContent  = `$${cash.toFixed(0)}`;
     document.getElementById("my-total").textContent = `$${total.toFixed(0)}`;
     document.getElementById("my-pct").textContent   = `${up ? "+" : ""}${pct}%`;
     document.getElementById("my-pct").className     = up ? "pct up" : "pct dn";
+
+    // 資產明細 Tab
+    const a2total = document.getElementById("asset2-total");
+    const a2pct   = document.getElementById("asset2-pct");
+    if (a2total) a2total.textContent = `$${total.toFixed(0)}`;
+    if (a2pct)   { a2pct.textContent = `${up?"+":""}${pct}%`; a2pct.className = up?"up":"dn"; }
+
+    const rows = document.getElementById("asset-detail-rows");
+    if (!rows) return;
+    const stockColors = { A:"#f0b942", B:"#34d58a", C:"#5b9cf6" };
+    let html = STOCKS.map(s => {
+      const qty   = myData.stocks?.[s.id] || 0;
+      const price = prices[s.id] || s.initPrice;
+      const val   = qty * price;
+      const col   = stockColors[s.id] || "#888";
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0;display:inline-block"></span>
+          <div>
+            <div style="font-size:13px;font-weight:500">${s.name}</div>
+            <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">${qty} 股 × $${price.toFixed(0)}</div>
+          </div>
+        </div>
+        <div style="font-size:14px;font-weight:600;font-family:'DM Mono',monospace;color:${qty>0?"#e8ecf4":"var(--muted)"}">${qty>0?"$"+val.toFixed(0):"—"}</div>
+      </div>`;
+    }).join("");
+    html += `<div style="height:1px;background:var(--border)"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;display:inline-block"></span>
+          <div>
+            <div style="font-size:13px;font-weight:500">現金</div>
+            <div style="font-size:11px;color:var(--muted)">可用資金</div>
+          </div>
+        </div>
+        <div style="font-size:14px;font-weight:600;font-family:'DM Mono',monospace;color:var(--green)">$${cash.toFixed(0)}</div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2)">
+        <div style="font-size:14px;font-weight:700">總資產</div>
+        <div style="font-size:16px;font-weight:700;font-family:'DM Mono',monospace;color:${up?"var(--green)":"var(--red)"}">$${total.toFixed(0)}</div>
+      </div>`;
+    rows.innerHTML = html;
   }
 
   function renderLeaderboard() {
@@ -277,7 +323,11 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 .screen{display:none}
 
 /* ── 登入 ── */
-#s-login{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center}
+#s-login{
+  min-height:100dvh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:32px 24px;text-align:center;
+}
 .login-logo{font-size:48px;margin-bottom:16px}
 .login-title{font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px}
 .login-sub{font-size:14px;color:var(--muted);margin-bottom:32px}
@@ -366,7 +416,7 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 .lb-pct{font-size:12px;min-width:54px;text-align:right}
 
 /* ── 底部導航 ── */
-.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--surface);border-top:1px solid var(--border);display:flex;z-index:50}
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--surface);border-top:1px solid var(--border);display:flex;z-index:50;padding-bottom:env(safe-area-inset-bottom,0px)}
 .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0;cursor:pointer;border:none;background:none;color:var(--muted);font-size:10px;font-family:'Noto Sans TC',sans-serif;gap:3px;transition:color .15s}
 .nav-btn.active,.nav-btn:hover{color:var(--gold)}
 .nav-icon{font-size:20px}
@@ -386,6 +436,8 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 #toast{position:fixed;top:60px;left:50%;transform:translateX(-50%) translateY(-20px);background:var(--accent);color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;z-index:999;white-space:nowrap}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast.show.error{background:var(--red)}
+
+.up{color:var(--green)} .dn{color:var(--red)}
 
 /* ── 動畫 ── */
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
@@ -485,6 +537,21 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
     </div>
   </div>
 
+  <!-- 資產明細 Tab -->
+  <div id="tab-asset" class="tab-panel">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:14px;text-align:center">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:'DM Mono',monospace;margin-bottom:6px">總資產</div>
+      <div style="font-size:34px;font-weight:700;font-family:'DM Mono',monospace;line-height:1;margin-bottom:4px" id="asset2-total">$—</div>
+      <div id="asset2-pct" style="font-size:14px;font-weight:600">—</div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:'DM Mono',monospace;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+      <span style="display:inline-block;width:3px;height:11px;background:var(--gold);border-radius:2px"></span>資產明細
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <div id="asset-detail-rows"><div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">載入中…</div></div>
+    </div>
+  </div>
+
   <!-- 排行榜 Tab -->
   <div id="tab-rank" class="tab-panel">
     <div class="asset-card" style="margin:14px">
@@ -525,8 +592,11 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
     <button class="nav-btn active" id="nav-market" onclick="switchTab('market',this)">
       <span class="nav-icon">📊</span>大盤
     </button>
+    <button class="nav-btn" onclick="switchTab('asset',this)">
+      <span class="nav-icon">💼</span>資產
+    </button>
     <button class="nav-btn" id="nav-rank" onclick="switchTab('rank',this)">
-      <span class="nav-icon">🏆</span>排行榜
+      <span class="nav-icon">🏆</span>排行
     </button>
     <button class="nav-btn" id="nav-math" onclick="switchTab('math',this)">
       <span class="nav-icon">🧮</span>數學
