@@ -62,8 +62,16 @@ async function loadConfig() {
   const snap = await get(ref(db, "config"));
   if (snap.exists()) {
     const cfg = snap.val();
-    stockConfig = cfg.stocks || DEFAULT_STOCKS;
-    roundConfig = cfg.rounds || DEFAULT_ROUNDS;
+    // 合併 Firebase 資料與預設值，確保新欄位（industry、desc）不會遺失
+    if (cfg.stocks) {
+      stockConfig = cfg.stocks.map((s, i) => ({
+        ...DEFAULT_STOCKS[i],   // 先填預設值
+        ...s,                   // 再用 Firebase 的覆蓋
+      }));
+    } else {
+      stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
+    }
+    roundConfig = cfg.rounds || JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
   } else {
     stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
     roundConfig = JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
@@ -449,6 +457,13 @@ window.addStock = function() {
   renderStockEditor();
 };
 
+window.resetStockDefaults = function() {
+  if (!confirm("確定還原成預設股票設定？")) return;
+  stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
+  renderStockEditor();
+  toast("已還原預設設定，請記得儲存。");
+};
+
 window.removeStock = function(i) {
   if (stockConfig.length<=1) return;
   stockConfig.splice(i,1);
@@ -764,7 +779,8 @@ button:disabled{opacity:.3;cursor:default}
   <div id="stock-editor"></div>
   <div class="save-bar">
     <button onclick="addStock()">＋ 新增股票</button>
-    <button class="btn-primary" onclick="saveStockConfig()">💾 儲存股票設定</button>
+    <button onclick="resetStockDefaults()">還原預設</button>
+    <button class="btn-primary" onclick="saveStockConfig()">儲存股票設定</button>
   </div>
 </div>
 
