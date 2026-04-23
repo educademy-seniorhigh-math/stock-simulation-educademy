@@ -523,7 +523,8 @@ window.saveStockConfig = async function() {
 //  TAB 5：新聞題庫
 // ════════════════════════════════════════════════
 function renderRoundEditor() {
-  const total = gameState?.totalRounds || 6;
+  const inputVal = parseInt(document.getElementById("set-total-rounds")?.value);
+  const total = inputVal || gameState?.totalRounds || 6;
   document.getElementById("round-editor").innerHTML = roundConfig.map((r,i) => {
     const min = r.roundMin || 1;
     const max = r.roundMax || total;
@@ -578,7 +579,8 @@ function renderRoundEditor() {
 
 window.addRound = function() {
   const trend = {};
-  const total = gameState?.totalRounds || 6;
+  const inputVal = parseInt(document.getElementById("set-total-rounds")?.value);
+  const total = inputVal || gameState?.totalRounds || 6;
   stockConfig.forEach(s => trend[s.id]=0);
   roundConfig.push({ title:"新則新聞", body:"", trend, roundMin:1, roundMax:total });
   renderRoundEditor();
@@ -608,7 +610,9 @@ window.saveSettings = async function() {
   const totalRounds = parseInt(document.getElementById("set-total-rounds").value) || 6;
   const kFactor     = parseFloat(document.getElementById("set-k-factor").value)   || 0.5;
   await update(ref(db,"game"), { initCash, totalRounds, kFactor });
-  toast("遊戲設定已儲存！");
+  // 立刻更新題庫介面的回合範圍上限
+  renderRoundEditor();
+  toast("遊戲設定已儲存！回合數已更新為 " + totalRounds + " 回合。");
 };
 
 window.saveRoundConfig = async function() {
@@ -910,7 +914,7 @@ button:disabled{opacity:.3;cursor:default}
       </div>
       <div class="form-group">
         <label>總回合數</label>
-        <input type="number" id="set-total-rounds" value="6" min="1" max="20">
+        <input type="number" id="set-total-rounds" value="6" min="1" max="99" oninput="renderRoundEditor()">
         <div class="form-hint">遊戲總共進行幾個回合</div>
       </div>
     </div>
