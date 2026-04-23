@@ -29,7 +29,8 @@ let gameState   = null;
 let playersMap  = {};
 let ordersMap   = {};
 let stockConfig = [];   // 從 Firebase 或預設值讀取
-let roundConfig = [];   // 回合新聞劇本
+let roundConfig = [];   // 回合新聞劇本（題庫）
+let usedNewsIdx = [];   // 已使用過的新聞索引（避免重複）
 let activeTab   = 'dashboard';
 
 const DEFAULT_STOCKS = [
@@ -38,12 +39,14 @@ const DEFAULT_STOCKS = [
   { id:"C", name:"生醫創新", initPrice:120, supply:800,  color:"#5b9cf6", industry:"生技", desc:"新藥研發與醫療器材製造，多項藥品進入國際三期臨床試驗。" },
 ];
 const DEFAULT_ROUNDS = [
-  { title:"科技股利多！新星科技獲大廠訂單", body:"業界傳出新星科技獲得海外大廠大量訂單，預計下季營收大幅成長。", trend:{A:0.12,B:0,C:0} },
-  { title:"聯準會升息，市場震盪",           body:"美國聯準會宣布升息一碼，全球股市普遍下跌，資金流向保守標的。", trend:{A:-0.08,B:-0.05,C:-0.10} },
-  { title:"綠能政策加持！電動車補貼擴大",   body:"政府宣布擴大電動車補貼，綠能電力受惠最深，市場預期訂單暴增。", trend:{A:0,B:0.18,C:0.04} },
-  { title:"生技新藥三期臨床試驗通過！",     body:"生醫創新旗下新藥三期臨床試驗通過，股價強烈反應創下新高。",   trend:{A:0,B:0,C:0.25} },
-  { title:"全球供應鏈危機，原物料短缺",     body:"國際原物料價格飆升，製造業成本壓力劇增，各大類股普遍受壓。", trend:{A:-0.10,B:-0.12,C:-0.06} },
-  { title:"【最終回合】年底財報季總結算",   body:"各公司財報陸續公布，市場進行年度總評，最終排名即將揭曉！",   trend:{A:0.05,B:0.07,C:0.09} },
+  { title:"科技股利多！新星科技獲大廠訂單", body:"業界傳出新星科技獲得海外大廠大量訂單，預計下季營收大幅成長。市場信心增溫。",       trend:{A:0.12,B:0,C:0},          roundMin:1, roundMax:3 },
+  { title:"聯準會升息，市場震盪",           body:"美國聯準會宣布升息一碼，全球股市普遍下跌，資金流向保守標的。",                       trend:{A:-0.08,B:-0.05,C:-0.10}, roundMin:1, roundMax:6 },
+  { title:"綠能政策加持！電動車補貼擴大",   body:"政府宣布擴大電動車補貼，綠能電力受惠最深，市場預期訂單暴增。",                       trend:{A:0,B:0.18,C:0.04},       roundMin:1, roundMax:4 },
+  { title:"生技新藥三期臨床試驗通過！",     body:"生醫創新旗下新藥三期臨床試驗通過，股價強烈反應創下新高。",                           trend:{A:0,B:0,C:0.25},          roundMin:2, roundMax:5 },
+  { title:"全球供應鏈危機，原物料短缺",     body:"國際原物料價格飆升，製造業成本壓力劇增，各大類股普遍受壓。",                         trend:{A:-0.10,B:-0.12,C:-0.06}, roundMin:2, roundMax:6 },
+  { title:"外資大舉買超，指數創高",         body:"外資連續買超科技與能源類股，市場樂觀氣氛升溫，成交量明顯放大。",                     trend:{A:0.08,B:0.10,C:0},       roundMin:1, roundMax:4 },
+  { title:"通膨數據高於預期，市場憂慮",     body:"最新消費者物價指數超出市場預估，市場擔憂央行將提前升息，科技股受壓最深。",           trend:{A:-0.12,B:0,C:-0.06},     roundMin:2, roundMax:6 },
+  { title:"【最終回合】年底財報季總結算",   body:"各公司財報陸續公布，市場進行年度總評，最終排名即將揭曉！把握最後機會！",             trend:{A:0.05,B:0.07,C:0.09},    roundMin:6, roundMax:6 },
 ];
 const INIT_CASH = 10000;
 
@@ -63,16 +66,12 @@ async function loadConfig() {
   if (snap.exists()) {
     const cfg = snap.val();
     if (cfg.stocks) {
-      // 直接用 Firebase 的資料，只補上完全缺少的欄位（不用 DEFAULT_STOCKS 覆蓋）
-      stockConfig = cfg.stocks.map(s => ({
-        industry: "",
-        desc: "",
-        ...s,
-      }));
+      stockConfig = cfg.stocks.map(s => ({ industry:"", desc:"", ...s }));
     } else {
       stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
     }
     roundConfig = cfg.rounds || JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
+    usedNewsIdx = cfg.usedNewsIdx || [];
   } else {
     stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
     roundConfig = JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
@@ -102,6 +101,7 @@ window.switchTab = function(tab) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + tab));
   if (tab === "settings") renderSettings();
+  if (tab === "rounds") updateUsedCount();
 };
 
 // ════════════════════════════════════════════════
@@ -241,14 +241,43 @@ window.initGame = async function() {
     prices, priceHistory:{}, news:roundConfig[0]||{}, started:true,
   });
   await set(ref(db,"orders"), null);
+  await set(ref(db,"config/usedNewsIdx"), []);
+  usedNewsIdx = [];
   // 不清除 players，保留名單
   toast("遊戲初始化完成！");
 };
 
 window.collectOrders = async function() {
-  const round = gameState?.round||0;
-  const news  = roundConfig[round]||gameState?.news||{};
-  await update(ref(db,"game"), { phase:"ordering", news });
+  const round = gameState?.round || 0;
+  // 從題庫裡找符合這回合的新聞，排除已用過的
+  const eligible = roundConfig
+    .map((r, i) => ({ ...r, _idx: i }))
+    .filter(r => {
+      const min = r.roundMin || 1;
+      const max = r.roundMax || 99;
+      const roundNum = round + 1;
+      return roundNum >= min && roundNum <= max && !usedNewsIdx.includes(r._idx);
+    });
+
+  let news;
+  if (eligible.length === 0) {
+    // 若全部用完，重置已用清單重新抽
+    usedNewsIdx = [];
+    const allEligible = roundConfig
+      .map((r, i) => ({ ...r, _idx: i }))
+      .filter(r => { const min=r.roundMin||1; const max=r.roundMax||99; return (round+1)>=min && (round+1)<=max; });
+    news = allEligible[Math.floor(Math.random() * allEligible.length)] || roundConfig[0];
+  } else {
+    news = eligible[Math.floor(Math.random() * eligible.length)];
+  }
+
+  // 記錄已使用
+  if (news._idx !== undefined) usedNewsIdx.push(news._idx);
+  const { _idx, roundMin, roundMax, ...cleanNews } = news;
+
+  // 儲存已用清單
+  await set(ref(db, "config/usedNewsIdx"), usedNewsIdx);
+  await update(ref(db,"game"), { phase:"ordering", news: cleanNews });
   await set(ref(db,"orders"), null);
   toast(`第 ${round+1} 回合開始收單！`);
 };
@@ -257,8 +286,8 @@ window.settleRound = async function() {
   if (!gameState || gameState.phase!=="ordering") return;
   const round     = gameState.round||0;
   const oldPrices = { ...gameState.prices };
-  const news      = roundConfig[round]||{};
-  const trend     = news.trend||{};
+  const news      = gameState.news || {};   // 使用本回合已抽到的新聞
+  const trend     = news.trend || {};
 
   // 計算淨買入量
   const netBuy = {};
@@ -332,6 +361,8 @@ window.endGame  = async () => { await update(ref(db,"game"),{phase:"ended"}); to
 window.resetAll = async () => {
   if (!confirm("確定全部重置？學生資料也會清除。")) return;
   await set(ref(db,"game"),null); await set(ref(db,"players"),null); await set(ref(db,"orders"),null);
+  await set(ref(db,"config/usedNewsIdx"), []);
+  usedNewsIdx = [];
   toast("已全部重置");
 };
 
@@ -489,22 +520,41 @@ window.saveStockConfig = async function() {
 };
 
 // ════════════════════════════════════════════════
-//  TAB 5：回合新聞劇本
+//  TAB 5：新聞題庫
 // ════════════════════════════════════════════════
 function renderRoundEditor() {
-  document.getElementById("round-editor").innerHTML = roundConfig.map((r,i) => `
-    <div class="editor-card">
+  const total = gameState?.totalRounds || 6;
+  document.getElementById("round-editor").innerHTML = roundConfig.map((r,i) => {
+    const min = r.roundMin || 1;
+    const max = r.roundMax || total;
+    const used = usedNewsIdx.includes(i);
+    return `<div class="editor-card" style="${used?"opacity:.55;":""}">
       <div class="editor-card-header">
-        <span class="editor-badge">第 ${i+1} 回合</span>
+        <div style="display:flex;align-items:center;gap:8px;flex:1">
+          <span class="editor-badge" style="background:var(--surface3);color:var(--muted)">題庫 #${i+1}</span>
+          ${used ? '<span style="font-size:11px;color:var(--gold);background:rgba(240,185,66,.12);padding:2px 8px;border-radius:4px;font-family:DM Mono,monospace">本局已使用</span>' : ''}
+        </div>
         <button class="btn-icon btn-icon-red" onclick="removeRound(${i})" ${roundConfig.length<=1?"disabled":""}>✕</button>
       </div>
       <div class="form-group">
         <label>新聞標題</label>
-        <input type="text" value="${r.title||""}" oninput="roundConfig[${i}].title=this.value" placeholder="輸入新聞標題…">
+        <input type="text" data-rfield="title" data-ridx="${i}" value="${r.title||""}" placeholder="輸入新聞標題…">
       </div>
       <div class="form-group">
         <label>新聞內容</label>
-        <textarea rows="2" oninput="roundConfig[${i}].body=this.value" placeholder="輸入新聞詳細內容…">${r.body||""}</textarea>
+        <textarea data-rfield="body" data-ridx="${i}" rows="2" placeholder="輸入新聞詳細內容…">${r.body||""}</textarea>
+      </div>
+      <div class="form-group">
+        <label>可出現回合範圍（第幾回合到第幾回合）</label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:13px;color:var(--muted)">第</span>
+          <input type="number" data-rfield="roundMin" data-ridx="${i}" value="${min}" min="1" max="${total}" style="width:64px;text-align:center">
+          <span style="font-size:13px;color:var(--muted)">回合 ～ 第</span>
+          <input type="number" data-rfield="roundMax" data-ridx="${i}" value="${max}" min="1" max="${total}" style="width:64px;text-align:center">
+          <span style="font-size:13px;color:var(--muted)">回合</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:4px">（共 ${total} 回合）</span>
+        </div>
+        <div class="form-hint">設定這則新聞可以在哪些回合中被隨機抽到</div>
       </div>
       <div class="form-group">
         <label>基準漲跌幅（新聞趨勢佔 50%，另外 50% 由學生買賣決定）</label>
@@ -513,7 +563,8 @@ function renderRoundEditor() {
             <div class="trend-input-item">
               <div class="trend-input-label" style="color:${s.color}">${s.id} ${s.name}</div>
               <div style="display:flex;align-items:center;gap:6px">
-                <input type="range" min="-50" max="50" value="${Math.round((r.trend?.[s.id]||0)*100)}"
+                <input type="range" data-rfield="trend_${s.id}" data-ridx="${i}" min="-50" max="50"
+                  value="${Math.round((r.trend?.[s.id]||0)*100)}"
                   oninput="roundConfig[${i}].trend=roundConfig[${i}].trend||{};roundConfig[${i}].trend['${s.id}']=+this.value/100;this.nextElementSibling.textContent=(+this.value>0?'+':'')+this.value+'%'"
                   style="flex:1;accent-color:${s.color}">
                 <span class="trend-val ${(r.trend?.[s.id]||0)>0?"up":(r.trend?.[s.id]||0)<0?"dn":"neutral"}">${Math.round((r.trend?.[s.id]||0)*100)>0?"+":""}${Math.round((r.trend?.[s.id]||0)*100)}%</span>
@@ -521,13 +572,15 @@ function renderRoundEditor() {
             </div>`).join("")}
         </div>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 window.addRound = function() {
   const trend = {};
-  stockConfig.forEach(s=>trend[s.id]=0);
-  roundConfig.push({ title:"新回合新聞", body:"", trend });
+  const total = gameState?.totalRounds || 6;
+  stockConfig.forEach(s => trend[s.id]=0);
+  roundConfig.push({ title:"新則新聞", body:"", trend, roundMin:1, roundMax:total });
   renderRoundEditor();
 };
 
@@ -559,9 +612,23 @@ window.saveSettings = async function() {
 };
 
 window.saveRoundConfig = async function() {
-  // re-read slider values before saving
+  // 儲存前讀取所有輸入框當前值
+  document.querySelectorAll("#round-editor [data-rfield]").forEach(el => {
+    const i = parseInt(el.dataset.ridx);
+    const field = el.dataset.rfield;
+    if (isNaN(i) || !roundConfig[i]) return;
+    if (field === "roundMin")  roundConfig[i].roundMin = parseInt(el.value) || 1;
+    else if (field === "roundMax") roundConfig[i].roundMax = parseInt(el.value) || 6;
+    else if (field.startsWith("trend_")) {
+      const sid = field.replace("trend_","");
+      roundConfig[i].trend = roundConfig[i].trend || {};
+      roundConfig[i].trend[sid] = parseFloat(el.value) / 100;
+    }
+    else roundConfig[i][field] = el.value;
+  });
   await saveConfig();
   renderRoundEditor();
+  toast("新聞題庫已儲存！");
 };
 
 // ── Toast ─────────────────────────────────────────────────
@@ -573,6 +640,22 @@ function toast(msg, type="ok") {
 }
 window.toast = toast;
 window.renderStockEditor  = renderStockEditor;
+window.renderRoundEditor  = renderRoundEditor;
+
+window.resetUsedNews = async function() {
+  await set(ref(db, "config/usedNewsIdx"), []);
+  usedNewsIdx = [];
+  renderRoundEditor();
+  updateUsedCount();
+  toast("已重置使用清單，下回合將重新隨機抽取");
+};
+
+function updateUsedCount() {
+  const uc = document.getElementById("used-count");
+  const pc = document.getElementById("pool-count");
+  if (uc) uc.textContent = usedNewsIdx.length;
+  if (pc) pc.textContent = roundConfig.length;
+}
 window.renderRoundEditor  = renderRoundEditor;
 window.renderPlayerManager = renderPlayerManager;
 </script>
@@ -799,11 +882,15 @@ button:disabled{opacity:.3;cursor:default}
 
 <!-- ── Tab 5：新聞劇本 ── -->
 <div class="tab-panel" id="tab-rounds">
-  <p style="color:var(--muted);font-size:13px;margin-bottom:16px">設定每回合的新聞標題、內容與基準漲跌幅。拖動滑桿可直覺調整漲跌幅，新聞趨勢與學生買賣行為各佔 50%。</p>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:4px">每則新聞都是題庫中的一張卡片。開始收單時系統會自動從「符合當前回合範圍」的新聞中隨機抽一則，且同局不重複。</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;margin-top:8px">
+    <span style="font-size:12px;background:rgba(240,185,66,.12);color:var(--gold);padding:4px 10px;border-radius:4px;font-family:'DM Mono',monospace">已使用 <span id="used-count">0</span> / <span id="pool-count">0</span> 則</span>
+    <button onclick="resetUsedNews()" style="font-size:12px;padding:4px 12px">重置已使用清單</button>
+  </div>
   <div id="round-editor"></div>
   <div class="save-bar">
-    <button onclick="addRound()">＋ 新增回合</button>
-    <button class="btn-primary" onclick="saveRoundConfig()">💾 儲存劇本</button>
+    <button onclick="addRound()">＋ 新增新聞</button>
+    <button class="btn-primary" onclick="saveRoundConfig()">儲存題庫</button>
   </div>
 </div>
 
