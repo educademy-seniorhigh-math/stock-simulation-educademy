@@ -92,6 +92,7 @@ window.switchTab = function(tab) {
   activeTab = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + tab));
+  if (tab === "settings") renderSettings();
 };
 
 // ════════════════════════════════════════════════
@@ -499,6 +500,27 @@ window.removeRound = function(i) {
   renderRoundEditor();
 };
 
+// ════════════════════════════════════════════════
+//  TAB 6：遊戲設定
+// ════════════════════════════════════════════════
+function renderSettings() {
+  const initCash   = gameState?.initCash    || 10000;
+  const totalRounds= gameState?.totalRounds || 6;
+  const k          = gameState?.kFactor     || 0.5;
+  document.getElementById("set-init-cash").value    = initCash;
+  document.getElementById("set-total-rounds").value = totalRounds;
+  document.getElementById("set-k-factor").value     = k;
+  document.getElementById("set-k-val").textContent  = k;
+}
+
+window.saveSettings = async function() {
+  const initCash    = parseInt(document.getElementById("set-init-cash").value)    || 10000;
+  const totalRounds = parseInt(document.getElementById("set-total-rounds").value) || 6;
+  const kFactor     = parseFloat(document.getElementById("set-k-factor").value)   || 0.5;
+  await update(ref(db,"game"), { initCash, totalRounds, kFactor });
+  toast("遊戲設定已儲存！");
+};
+
 window.saveRoundConfig = async function() {
   // re-read slider values before saving
   await saveConfig();
@@ -667,6 +689,7 @@ button:disabled{opacity:.3;cursor:default}
     <button class="tab-btn" data-tab="players">學生管理</button>
     <button class="tab-btn" data-tab="stocks">股票設定</button>
     <button class="tab-btn" data-tab="rounds">新聞劇本</button>
+    <button class="tab-btn" data-tab="settings">遊戲設定</button>
   </nav>
 </header>
 
@@ -743,6 +766,77 @@ button:disabled{opacity:.3;cursor:default}
   <div class="save-bar">
     <button onclick="addRound()">＋ 新增回合</button>
     <button class="btn-primary" onclick="saveRoundConfig()">💾 儲存劇本</button>
+  </div>
+</div>
+
+<!-- ── Tab 6：遊戲設定 ── -->
+<div class="tab-panel" id="tab-settings">
+  <p style="color:var(--muted);font-size:13px;margin-bottom:20px">調整遊戲的基本參數。修改後點「套用設定」，下次初始化時生效。</p>
+
+  <div class="editor-card">
+    <div class="editor-card-header">
+      <span class="editor-badge" style="background:rgba(240,185,66,.15);color:var(--gold)">基本參數</span>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>學生初始資金（元）</label>
+        <input type="number" id="set-init-cash" value="10000" min="1000" step="1000">
+        <div class="form-hint">每位學生一開始擁有的現金金額</div>
+      </div>
+      <div class="form-group">
+        <label>總回合數</label>
+        <input type="number" id="set-total-rounds" value="6" min="1" max="20">
+        <div class="form-hint">遊戲總共進行幾個回合</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="editor-card">
+    <div class="editor-card-header">
+      <span class="editor-badge" style="background:rgba(91,156,246,.15);color:var(--blue)">供需靈敏度</span>
+    </div>
+    <div class="form-group">
+      <label>K 值（學生買賣影響股價的強度）</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+        <span style="font-size:12px;color:var(--muted)">弱</span>
+        <input type="range" id="set-k-factor" min="0.1" max="1.0" step="0.05" value="0.5"
+          oninput="document.getElementById('set-k-val').textContent=this.value"
+          style="flex:1;accent-color:var(--blue)">
+        <span style="font-size:12px;color:var(--muted)">強</span>
+        <span id="set-k-val" class="mono" style="min-width:36px;text-align:right;font-size:14px;font-weight:600;color:var(--blue)">0.5</span>
+      </div>
+      <div class="form-hint" style="margin-top:6px">
+        K=0.1：學生行為幾乎不影響股價，新聞主導一切<br>
+        K=0.5：新聞與買賣各佔一半（預設）<br>
+        K=1.0：學生集體行為可大幅左右股價
+      </div>
+    </div>
+  </div>
+
+  <div class="editor-card">
+    <div class="editor-card-header">
+      <span class="editor-badge" style="background:rgba(167,139,250,.15);color:var(--purple)">密碼保護</span>
+    </div>
+    <div class="form-group">
+      <label>老師控制台密碼（選填）</label>
+      <input type="password" id="set-password" placeholder="留空表示不設密碼">
+      <div class="form-hint">設定後學生無法直接開啟老師頁面（需搭配額外的登入邏輯，目前為示意設定）</div>
+    </div>
+  </div>
+
+  <div class="editor-card" style="border-left:4px solid var(--red)">
+    <div class="editor-card-header">
+      <span class="editor-badge" style="background:rgba(240,97,78,.1);color:var(--red)">危險操作</span>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">以下操作無法復原，請謹慎使用。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="initGame()" class="btn-primary">重新初始化遊戲</button>
+      <button onclick="resetAll()" class="btn-red">清除所有資料</button>
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <button class="btn-primary" onclick="saveSettings()">套用設定</button>
   </div>
 </div>
 
