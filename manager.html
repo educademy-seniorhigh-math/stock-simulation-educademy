@@ -575,10 +575,10 @@ function renderRoundEditor() {
                       const v=+this.value;
                       roundConfig[${i}].trend=roundConfig[${i}].trend||{};
                       roundConfig[${i}].trend['${s.id}']=v/100;
-                      this.nextElementSibling.textContent=(v>0?'+':'')+v+'%';
+                      this.nextElementSibling.textContent = v===0 ? '' : (v>0?'+':'') + v + '%';
                       this.nextElementSibling.className='trend-val '+(v>0?'up':v<0?'dn':'neutral');
                     ">
-                  <span class="trend-val ${cls}" style="min-width:44px;text-align:left">${val>0?'+':''}${val}%</span>
+                  <span class="trend-val ${cls}" style="min-width:44px;text-align:left">${val===0?'':`${val>0?'+':''}${val}%`}</span>
                 </div>
               </div>
             </div>`;
