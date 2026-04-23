@@ -105,16 +105,26 @@ body {
 .news-title { font-size:14px; font-weight:700; color:var(--text); line-height:1.4; margin-bottom:4px; }
 .news-body  { font-size:12px; color:var(--muted); line-height:1.6; }
 
-.price-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.price-grid { display:flex; flex-direction:column; gap:8px; }
 .price-card {
   background:var(--surface); border:1px solid var(--border);
-  border-radius:10px; padding:12px 8px; text-align:center;
+  border-radius:10px; padding:14px 16px;
+  display:grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  gap:2px 12px;
+  align-items:center;
 }
-.pc-id    { font-size:11px; font-weight:700; font-family:'DM Mono',monospace; background:var(--surface2); padding:1px 6px; border-radius:4px; display:inline-block; margin-bottom:4px; }
-.pc-name  { font-size:10px; color:var(--muted); margin-bottom:6px; }
-.pc-price { font-size:20px; font-weight:600; font-family:'DM Mono',monospace; }
-.pc-chg   { font-size:11px; font-weight:600; margin-top:2px; }
-.pc-hold  { font-size:11px; color:var(--muted); margin-top:4px; }
+.pc-left   { grid-column:1; grid-row:1/3; display:flex; flex-direction:column; align-items:center; gap:4px; min-width:44px; }
+.pc-id     { font-size:12px; font-weight:700; font-family:'DM Mono',monospace; background:var(--surface2); padding:3px 8px; border-radius:5px; display:inline-block; }
+.pc-industry { font-size:10px; font-weight:600; padding:2px 6px; border-radius:3px; background:var(--surface2); color:var(--muted); white-space:nowrap; }
+.pc-middle { grid-column:2; grid-row:1; }
+.pc-name   { font-size:16px; font-weight:700; color:var(--text); line-height:1.3; }
+.pc-desc   { grid-column:2; grid-row:2; font-size:11px; color:var(--muted); line-height:1.4; margin-top:2px; }
+.pc-right  { grid-column:3; grid-row:1/3; text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.pc-price  { font-size:22px; font-weight:700; font-family:'DM Mono',monospace; line-height:1; }
+.pc-chg    { font-size:12px; font-weight:600; }
+.pc-hold   { font-size:11px; color:var(--muted); white-space:nowrap; }
 
 /* 資產 */
 .asset-hero {
@@ -338,9 +348,9 @@ async function boot() {
 async function loadStocks() {
   const snap = await get(ref(db, "config/stocks"));
   stockConfig = snap.exists() ? snap.val() : [
-    { id:"A", name:"新星科技", initPrice:100, supply:1000, color:"#f0b942" },
-    { id:"B", name:"綠能電力", initPrice:80,  supply:1200, color:"#34d58a" },
-    { id:"C", name:"生醫創新", initPrice:120, supply:800,  color:"#5b9cf6" },
+    { id:"A", name:"新星科技", initPrice:100, supply:1000, color:"#f0b942", industry:"科技", desc:"專注於半導體與AI晶片研發，近年積極拓展海外市場。" },
+    { id:"B", name:"綠能電力", initPrice:80,  supply:1200, color:"#34d58a", industry:"能源", desc:"台灣最大再生能源供應商，主力產品為太陽能與風力發電。" },
+    { id:"C", name:"生醫創新", initPrice:120, supply:800,  color:"#5b9cf6", industry:"生技", desc:"新藥研發與醫療器材製造，多項藥品進入國際三期臨床試驗。" },
   ];
 }
 
@@ -427,12 +437,20 @@ function renderGame() {
   document.getElementById("price-grid").innerHTML = stockConfig.map(s => {
     const p=prices[s.id]||s.initPrice, prev=round>0?(hist[round-1]?.[s.id]||s.initPrice):s.initPrice;
     const chg=((p-prev)/prev*100).toFixed(1), up=p>=prev, hold=myData?.stocks?.[s.id]||0;
-    return `<div class="price-card" style="border-top:3px solid ${s.color}">
-      <div class="pc-id" style="color:${s.color}">${s.id}</div>
-      <div class="pc-name">${s.name}</div>
-      <div class="pc-price ${up?"up":"dn"}">${p.toFixed(0)}</div>
-      <div class="pc-chg  ${up?"up":"dn"}">${up?"▲":"▼"} ${Math.abs(chg)}%</div>
-      <div class="pc-hold">持有 <strong>${hold}</strong> 股</div>
+    return `<div class="price-card" style="border-left:4px solid ${s.color}">
+      <div class="pc-left">
+        <span class="pc-id" style="color:${s.color}">${s.id}</span>
+        <span class="pc-industry" style="border:1px solid ${s.color}40;color:${s.color}">${s.industry||"—"}</span>
+      </div>
+      <div class="pc-middle">
+        <div class="pc-name">${s.name}</div>
+      </div>
+      <div class="pc-desc">${s.desc||""}</div>
+      <div class="pc-right">
+        <div class="pc-price ${up?"up":"dn"}">${p.toFixed(0)}</div>
+        <div class="pc-chg  ${up?"up":"dn"}">${up?"▲":"▼"} ${Math.abs(chg)}%</div>
+        <div class="pc-hold">持有 ${hold} 股</div>
+      </div>
     </div>`;
   }).join("");
 
