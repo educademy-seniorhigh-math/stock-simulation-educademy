@@ -318,16 +318,16 @@
   --text:#e8ecf4;--muted:#7a82a0;--green:#34d58a;--red:#f0614e;
   --gold:#f0b942;--blue:#5b9cf6;--accent:#3d5cf5;
 }
-body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100%;max-width:480px;margin:0 auto;display:flex;flex-direction:column}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;font-size:14px;max-width:480px;margin:0 auto;display:flex;flex-direction:column}
 .mono{font-family:'DM Mono',monospace}
-.screen{display:none}
+.screen{display:none;flex:1;flex-direction:column}
 
 /* ── 登入 ── */
 #s-login{
   flex:1;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:32px 24px;text-align:center;
-  min-height:100vh;
 }
 .login-logo{font-size:48px;margin-bottom:16px}
 .login-title{font-size:24px;font-weight:700;color:var(--gold);margin-bottom:8px}
@@ -339,7 +339,7 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 .btn-login:hover{background:#5068ff}
 
 /* ── 遊戲主體 ── */
-#s-game{padding-bottom:80px}
+#s-game{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .top-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
 .top-name{font-weight:700;color:var(--gold);font-size:14px}
 .top-right{display:flex;align-items:center;gap:10px}
@@ -447,7 +447,7 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 <body>
 
 <!-- ── 登入畫面 ── -->
-<div class="screen" id="s-login" style="display:flex">
+<div class="screen" id="s-login" style="display:flex;flex:1">
   <div class="login-logo">📈</div>
   <div class="login-title">股市模擬交易</div>
   <div class="login-sub">輸入你的名字，開始體驗真實的股市！</div>
