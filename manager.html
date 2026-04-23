@@ -196,7 +196,7 @@ function renderRoundStatus() {
       }).join("")}</div>` : ""}
     </div>`;
 
-  const canCollect = (phase==="waiting" && gameState.started!==false);
+  const canCollect = (phase==="waiting" || phase==="settled") && gameState.started!==false;
   const canSettle  = (phase==="ordering");
   const canNext    = (phase==="settled" && round < (gameState.totalRounds||6)-1);
   document.getElementById("btn-collect").disabled = !canCollect;
@@ -691,10 +691,10 @@ button:disabled{opacity:.3;cursor:default}
 <div class="tab-panel" id="tab-round">
   <div id="round-info"></div>
   <div class="btn-row">
-    <button class="btn-green" id="btn-collect" onclick="collectOrders()" disabled>▶ 開始收單</button>
-    <button class="btn-green" id="btn-settle"  onclick="settleRound()"  disabled>⚡ 結算回合</button>
-    <button id="btn-next" onclick="nextRound()" disabled>⏭ 下一回合</button>
-    <button id="btn-end"  onclick="endGame()">⏹ 結束遊戲</button>
+    <button class="btn-green" id="btn-collect" onclick="collectOrders()" disabled>開始收單</button>
+    <button class="btn-green" id="btn-settle"  onclick="settleRound()"  disabled>結算回合</button>
+    <button id="btn-next" onclick="nextRound()" disabled>下一回合</button>
+    <button id="btn-end"  onclick="endGame()">結束遊戲</button>
   </div>
   <div style="margin-bottom:14px">
     <div class="section-title">當前回合新聞</div>
@@ -707,8 +707,8 @@ button:disabled{opacity:.3;cursor:default}
   <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
   <div class="section-title" style="color:var(--red)">危險區域</div>
   <div class="btn-row">
-    <button onclick="initGame()" class="btn-primary">🔧 初始化／重新開始遊戲</button>
-    <button onclick="resetAll()" class="btn-red">♻ 全部重置（含學生資料）</button>
+    <button onclick="initGame()" class="btn-primary">初始化／重新開始遊戲</button>
+    <button onclick="resetAll()" class="btn-red">全部重置（含學生資料）</button>
   </div>
 </div>
 
