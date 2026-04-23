@@ -33,9 +33,9 @@ let roundConfig = [];   // 回合新聞劇本
 let activeTab   = 'dashboard';
 
 const DEFAULT_STOCKS = [
-  { id:"A", name:"新星科技", initPrice:100, supply:1000, color:"#f0b942" },
-  { id:"B", name:"綠能電力", initPrice:80,  supply:1200, color:"#34d58a" },
-  { id:"C", name:"生醫創新", initPrice:120, supply:800,  color:"#5b9cf6" },
+  { id:"A", name:"新星科技", initPrice:100, supply:1000, color:"#f0b942", industry:"科技", desc:"專注於半導體與AI晶片研發，近年積極拓展海外市場。" },
+  { id:"B", name:"綠能電力", initPrice:80,  supply:1200, color:"#34d58a", industry:"能源", desc:"台灣最大再生能源供應商，主力產品為太陽能與風力發電。" },
+  { id:"C", name:"生醫創新", initPrice:120, supply:800,  color:"#5b9cf6", industry:"生技", desc:"新藥研發與醫療器材製造，多項藥品進入國際三期臨床試驗。" },
 ];
 const DEFAULT_ROUNDS = [
   { title:"科技股利多！新星科技獲大廠訂單", body:"業界傳出新星科技獲得海外大廠大量訂單，預計下季營收大幅成長。", trend:{A:0.12,B:0,C:0} },
@@ -62,8 +62,16 @@ async function loadConfig() {
   const snap = await get(ref(db, "config"));
   if (snap.exists()) {
     const cfg = snap.val();
-    stockConfig = cfg.stocks || DEFAULT_STOCKS;
-    roundConfig = cfg.rounds || DEFAULT_ROUNDS;
+    // 合併 Firebase 資料與預設值，確保新欄位（industry、desc）不會遺失
+    if (cfg.stocks) {
+      stockConfig = cfg.stocks.map((s, i) => ({
+        ...DEFAULT_STOCKS[i],   // 先填預設值
+        ...s,                   // 再用 Firebase 的覆蓋
+      }));
+    } else {
+      stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
+    }
+    roundConfig = cfg.rounds || JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
   } else {
     stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
     roundConfig = JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
@@ -412,6 +420,11 @@ function renderStockEditor() {
           <input type="text" value="${s.name}" oninput="stockConfig[${i}].name=this.value" placeholder="新星科技">
         </div>
         <div class="form-group">
+          <label>產業標籤</label>
+          <input type="text" value="${s.industry||''}" maxlength="6" oninput="stockConfig[${i}].industry=this.value" placeholder="科技">
+          <div class="form-hint">顯示在股票卡片上的產業分類，如：科技、能源、生技</div>
+        </div>
+        <div class="form-group">
           <label>初始股價（元）</label>
           <input type="number" value="${s.initPrice}" min="1" oninput="stockConfig[${i}].initPrice=+this.value" placeholder="100">
         </div>
@@ -428,6 +441,10 @@ function renderStockEditor() {
           </div>
         </div>
       </div>
+      <div class="form-group" style="margin-top:10px">
+        <label>公司介紹（顯示在股票卡片）</label>
+        <textarea rows="2" oninput="stockConfig[${i}].desc=this.value" placeholder="簡短描述這間公司的業務與特色…">${s.desc||''}</textarea>
+      </div>
     </div>`).join("");
 }
 
@@ -438,6 +455,13 @@ window.addStock = function() {
   const colors = ["#f0b942","#34d58a","#5b9cf6","#f0614e","#a78bfa","#fb923c"];
   stockConfig.push({ id:nextId, name:"新股票", initPrice:100, supply:1000, color:colors[stockConfig.length%colors.length] });
   renderStockEditor();
+};
+
+window.resetStockDefaults = function() {
+  if (!confirm("確定還原成預設股票設定？")) return;
+  stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
+  renderStockEditor();
+  toast("已還原預設設定，請記得儲存。");
 };
 
 window.removeStock = function(i) {
@@ -755,7 +779,8 @@ button:disabled{opacity:.3;cursor:default}
   <div id="stock-editor"></div>
   <div class="save-bar">
     <button onclick="addStock()">＋ 新增股票</button>
-    <button class="btn-primary" onclick="saveStockConfig()">💾 儲存股票設定</button>
+    <button onclick="resetStockDefaults()">還原預設</button>
+    <button class="btn-primary" onclick="saveStockConfig()">儲存股票設定</button>
   </div>
 </div>
 
