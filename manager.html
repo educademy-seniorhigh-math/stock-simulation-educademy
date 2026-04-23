@@ -413,7 +413,7 @@ function renderStockEditor() {
       <div class="form-grid">
         <div class="form-group">
           <label>股票代號</label>
-          <input type="text" value="${s.id}" maxlength="3" oninput="stockConfig[${i}].id=this.value" placeholder="A">
+          <input type="text" value="${s.id}" maxlength="6" oninput="stockConfig[${i}].id=this.value" placeholder="A">
         </div>
         <div class="form-group">
           <label>公司名稱</label>
@@ -421,7 +421,7 @@ function renderStockEditor() {
         </div>
         <div class="form-group">
           <label>產業標籤</label>
-          <input type="text" value="${s.industry||''}" maxlength="6" oninput="stockConfig[${i}].industry=this.value" placeholder="科技">
+          <input type="text" value="${s.industry||''}" maxlength="12" oninput="stockConfig[${i}].industry=this.value" placeholder="科技">
           <div class="form-hint">顯示在股票卡片上的產業分類，如：科技、能源、生技</div>
         </div>
         <div class="form-group">
