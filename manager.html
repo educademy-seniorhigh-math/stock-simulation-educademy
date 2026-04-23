@@ -62,11 +62,12 @@ async function loadConfig() {
   const snap = await get(ref(db, "config"));
   if (snap.exists()) {
     const cfg = snap.val();
-    // 合併 Firebase 資料與預設值，確保新欄位（industry、desc）不會遺失
     if (cfg.stocks) {
-      stockConfig = cfg.stocks.map((s, i) => ({
-        ...DEFAULT_STOCKS[i],   // 先填預設值
-        ...s,                   // 再用 Firebase 的覆蓋
+      // 直接用 Firebase 的資料，只補上完全缺少的欄位（不用 DEFAULT_STOCKS 覆蓋）
+      stockConfig = cfg.stocks.map(s => ({
+        industry: "",
+        desc: "",
+        ...s,
       }));
     } else {
       stockConfig = JSON.parse(JSON.stringify(DEFAULT_STOCKS));
@@ -413,37 +414,39 @@ function renderStockEditor() {
       <div class="form-grid">
         <div class="form-group">
           <label>股票代號</label>
-          <input type="text" value="${s.id}" maxlength="6" oninput="stockConfig[${i}].id=this.value" placeholder="A">
+          <input type="text" data-field="id" data-idx="${i}" value="${s.id}" maxlength="6" placeholder="A">
         </div>
         <div class="form-group">
           <label>公司名稱</label>
-          <input type="text" value="${s.name}" oninput="stockConfig[${i}].name=this.value" placeholder="新星科技">
+          <input type="text" data-field="name" data-idx="${i}" value="${s.name}" placeholder="新星科技">
         </div>
         <div class="form-group">
           <label>產業標籤</label>
-          <input type="text" value="${s.industry||''}" maxlength="12" oninput="stockConfig[${i}].industry=this.value" placeholder="科技">
+          <input type="text" data-field="industry" data-idx="${i}" value="${s.industry||''}" maxlength="12" placeholder="科技">
           <div class="form-hint">顯示在股票卡片上的產業分類，如：科技、能源、生技</div>
         </div>
         <div class="form-group">
           <label>初始股價（元）</label>
-          <input type="number" value="${s.initPrice}" min="1" oninput="stockConfig[${i}].initPrice=+this.value" placeholder="100">
+          <input type="number" data-field="initPrice" data-idx="${i}" value="${s.initPrice}" min="1" placeholder="100">
         </div>
         <div class="form-group">
           <label>流通股數（影響供需靈敏度）</label>
-          <input type="number" value="${s.supply}" min="100" step="100" oninput="stockConfig[${i}].supply=+this.value" placeholder="1000">
+          <input type="number" data-field="supply" data-idx="${i}" value="${s.supply}" min="100" step="100" placeholder="1000">
           <div class="form-hint">數字越小，買賣行為對股價影響越大</div>
         </div>
         <div class="form-group">
           <label>代表色</label>
           <div style="display:flex;gap:8px;align-items:center">
-            <input type="color" value="${s.color}" oninput="stockConfig[${i}].color=this.value;renderStockEditor()" style="width:44px;height:36px;border-radius:6px;border:1px solid var(--border);cursor:pointer;padding:2px">
+            <input type="color" data-field="color" data-idx="${i}" value="${s.color}"
+              oninput="stockConfig[${i}].color=this.value;renderStockEditor()"
+              style="width:44px;height:36px;border-radius:6px;border:1px solid var(--border);cursor:pointer;padding:2px">
             <span style="font-size:12px;color:var(--muted)">${s.color}</span>
           </div>
         </div>
       </div>
       <div class="form-group" style="margin-top:10px">
         <label>公司介紹（顯示在股票卡片）</label>
-        <textarea rows="2" oninput="stockConfig[${i}].desc=this.value" placeholder="簡短描述這間公司的業務與特色…">${s.desc||''}</textarea>
+        <textarea data-field="desc" data-idx="${i}" rows="2" placeholder="簡短描述這間公司的業務與特色…">${s.desc||''}</textarea>
       </div>
     </div>`).join("");
 }
@@ -471,8 +474,18 @@ window.removeStock = function(i) {
 };
 
 window.saveStockConfig = async function() {
+  // 儲存前從 data-field 屬性讀取所有輸入框的當前值
+  document.querySelectorAll("#stock-editor [data-field]").forEach(el => {
+    const i     = parseInt(el.dataset.idx);
+    const field = el.dataset.field;
+    if (isNaN(i) || !stockConfig[i]) return;
+    if (field === "initPrice") stockConfig[i][field] = parseFloat(el.value) || stockConfig[i][field];
+    else if (field === "supply") stockConfig[i][field] = parseInt(el.value) || stockConfig[i][field];
+    else stockConfig[i][field] = el.value;
+  });
   await saveConfig();
   renderStockEditor();
+  toast("股票設定已儲存！");
 };
 
 // ════════════════════════════════════════════════
