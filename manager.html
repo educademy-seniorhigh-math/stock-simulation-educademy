@@ -566,9 +566,16 @@ function renderRoundEditor() {
               <div style="display:flex;align-items:center;gap:6px">
                 <input type="range" data-rfield="trend_${s.id}" data-ridx="${i}" min="-50" max="50"
                   value="${Math.round((r.trend?.[s.id]||0)*100)}"
-                  oninput="roundConfig[${i}].trend=roundConfig[${i}].trend||{};roundConfig[${i}].trend['${s.id}']=+this.value/100;this.nextElementSibling.textContent=(+this.value>0?'+':'')+this.value+'%'"
+                  oninput="
+                    const v=+this.value;
+                    roundConfig[${i}].trend=roundConfig[${i}].trend||{};
+                    roundConfig[${i}].trend['${s.id}']=v/100;
+                    const sp=this.nextElementSibling;
+                    sp.textContent=(v>0?'+':'')+v+'%';
+                    sp.className='trend-val '+(v>0?'up':v<0?'dn':'neutral');
+                  "
                   style="flex:1;accent-color:${s.color}">
-                <span class="trend-val ${(r.trend?.[s.id]||0)>0?"up":(r.trend?.[s.id]||0)<0?"dn":"neutral"}">${Math.round((r.trend?.[s.id]||0)*100)>0?"+":""}${Math.round((r.trend?.[s.id]||0)*100)}%</span>
+                <span class="trend-val ${(r.trend?.[s.id]||0)>0?'up':(r.trend?.[s.id]||0)<0?'dn':'neutral'}">${Math.round((r.trend?.[s.id]||0)*100)>0?'+':''}${Math.round((r.trend?.[s.id]||0)*100)}%</span>
               </div>
             </div>`).join("")}
         </div>
