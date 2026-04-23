@@ -179,11 +179,13 @@ function renderRoundStatus() {
 
   document.getElementById("round-info").innerHTML = `
     <div class="round-banner">
-      <div>
-        <div class="round-label">目前回合</div>
-        <div class="round-num">${round+1} / ${gameState.totalRounds||6}</div>
+      <div style="display:flex;align-items:baseline;gap:0">
+        <div class="round-label" style="margin-bottom:0;margin-right:12px">目前回合</div>
+        <span class="round-num">${round+1}</span>
+        <span style="font-size:18px;color:var(--muted);margin:0 6px;font-family:'DM Mono',monospace">／</span>
+        <span style="font-size:22px;color:var(--muted);font-family:'DM Mono',monospace;font-weight:500">${gameState.totalRounds||6}</span>
       </div>
-      <div class="phase-badge phase-${phase}">${{waiting:"等待中",ordering:"🔴 收單中",settled:"✅ 已結算",ended:"🎉 結束"}[phase]||phase}</div>
+      <div class="phase-badge phase-${phase}">${{waiting:"等待中",ordering:"收單中",settled:"已結算",ended:"結束"}[phase]||phase}</div>
     </div>`;
 
   document.getElementById("cur-news-display").innerHTML = `
@@ -576,7 +578,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 /* ── Round control ── */
 .round-banner{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .round-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:'DM Mono',monospace}
-.round-num{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--gold)}
+.round-num{font-family:'DM Mono',monospace;font-size:36px;font-weight:500;color:var(--gold);line-height:1}
 .phase-badge{font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;font-family:'DM Mono',monospace}
 .phase-waiting{background:rgba(52,213,138,.12);color:var(--green);border:1px solid rgba(52,213,138,.3)}
 .phase-ordering{background:rgba(240,185,66,.12);color:var(--gold);border:1px solid rgba(240,185,66,.3)}
