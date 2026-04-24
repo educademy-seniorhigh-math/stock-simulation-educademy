@@ -102,7 +102,7 @@ window.switchTab = function(tab) {
   activeTab = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + tab));
-  if (tab === "settings") renderSettings();
+  if (tab === "settings") { renderSettings(); loadGamePassword(); }
   if (tab === "rounds") updateUsedCount();
 };
 
@@ -794,6 +794,26 @@ window.toast = toast;
 window.renderStockEditor  = renderStockEditor;
 window.renderRoundEditor  = renderRoundEditor;
 
+window.saveGamePassword = async function() {
+  const pw = document.getElementById("set-game-password").value.trim();
+  await set(ref(db, "config/gamePassword"), pw);
+  const st = document.getElementById("pw-status");
+  st.style.display = "block";
+  st.textContent = pw ? `✓ 密碼已設定為「${pw}」` : "✓ 密碼已清除（學生無需密碼）";
+  toast(pw ? `已設定遊戲密碼` : "已清除遊戲密碼");
+};
+
+// 載入現有密碼
+async function loadGamePassword() {
+  const snap = await get(ref(db, "config/gamePassword"));
+  const el   = document.getElementById("set-game-password");
+  if (el && snap.exists() && snap.val()) {
+    el.value = snap.val();
+    const st = document.getElementById("pw-status");
+    if (st) { st.style.display="block"; st.textContent=`目前密碼：「${snap.val()}」`; }
+  }
+}
+
 window.resetUsedNews = async function() {
   await set(ref(db, "config/usedNewsIdx"), []);
   usedNewsIdx = [];
@@ -1110,13 +1130,17 @@ button:disabled{opacity:.3;cursor:default}
 
   <div class="editor-card">
     <div class="editor-card-header">
-      <span class="editor-badge" style="background:rgba(167,139,250,.15);color:var(--purple)">密碼保護</span>
+      <span class="editor-badge" style="background:rgba(167,139,250,.15);color:var(--purple)">學生登入密碼</span>
     </div>
     <div class="form-group">
-      <label>老師控制台密碼（選填）</label>
-      <input type="password" id="set-password" placeholder="留空表示不設密碼">
-      <div class="form-hint">設定後學生無法直接開啟老師頁面（需搭配額外的登入邏輯，目前為示意設定）</div>
+      <label>遊戲密碼（選填）</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="set-game-password" placeholder="留空表示不需要密碼" style="flex:1">
+        <button onclick="saveGamePassword()" class="btn-primary" style="white-space:nowrap">儲存密碼</button>
+      </div>
+      <div class="form-hint" style="margin-top:6px">設定後，學生輸入名字後需要再輸入此密碼才能登入。留空則不需要密碼。</div>
     </div>
+    <div id="pw-status" style="font-size:12px;color:var(--green);margin-top:6px;display:none">✓ 密碼已儲存</div>
   </div>
 
   <div class="editor-card" style="border-left:4px solid var(--red)">
