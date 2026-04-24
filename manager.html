@@ -215,7 +215,8 @@ function renderRoundStatus() {
   const canSettle  = (phase==="ordering");
   const canNext    = (phase==="settled" && round < total - 1);
   document.getElementById("btn-collect").disabled = !canCollect;
-  document.getElementById("btn-settle").disabled  = !canSettle;
+  const settleBtn = document.getElementById("btn-settle");
+  if (settleBtn) settleBtn.disabled = !canSettle;
   document.getElementById("btn-next").disabled    = !canNext;
   document.getElementById("btn-end").disabled     = (phase==="ended");
   const pauseBtn = document.getElementById("btn-pause");
@@ -313,8 +314,17 @@ window.collectOrders = async function() {
   toast(`第 ${round+1} 回合開始收單！倒數 ${roundSecs} 秒`);
 };
 
+let _isSettling = false;
 window.settleRound = async function() {
-  if (!gameState || gameState.phase!=="ordering") return;
+  if (_isSettling) return;
+  // 允許手動按鈕（phase=ordering）或計時器到期觸發（可能 gameState 尚未更新）
+  if (!gameState) return;
+  if (gameState.phase !== "ordering") {
+    // 若 phase 不是 ordering，先從 Firebase 重新確認
+    const snap = await get(ref(db, "game/phase"));
+    if (!snap.exists() || snap.val() !== "ordering") return;
+  }
+  _isSettling = true;
   const round     = gameState.round||0;
   const oldPrices = { ...gameState.prices };
   const news      = gameState.news || {};   // 使用本回合已抽到的新聞
@@ -379,6 +389,7 @@ window.settleRound = async function() {
   await update(ref(db,"game"), { prices:newPrices, priceHistory, phase:"settled", netBuy, deadlineAt:null });
   await set(ref(db,"orders"), null);
   renderTimer(0, false);
+  _isSettling = false;
   toast("結算完成！");
 };
 
@@ -722,9 +733,13 @@ function startLocalTimer(deadlineAt) {
       timerInterval = null;
       toast("時間到！自動結算中…");
       await settleRound();
-      if (gameState?.round < (gameState?.totalRounds || 6) - 1) {
-        setTimeout(() => nextRound(), 1500);
-      }
+      // 等 Firebase 更新 gameState 後再判斷是否進入下一回合
+      setTimeout(() => {
+        const curRound = gameState?.round ?? 0;
+        const total    = gameState?.totalRounds || parseInt(document.getElementById("set-total-rounds")?.value) || 6;
+        if (curRound < total - 1) nextRound();
+        else { update(ref(db,"game"), { phase:"ended" }); toast("遊戲結束！"); }
+      }, 1800);
     }
   }, 500);
 }
