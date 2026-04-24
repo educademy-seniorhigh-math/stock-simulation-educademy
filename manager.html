@@ -187,13 +187,14 @@ function renderRoundStatus() {
   const phase = gameState.phase || "waiting";
   const news  = gameState.news  || {};
 
+  const total = gameState.totalRounds || parseInt(document.getElementById("set-total-rounds")?.value) || 6;
   document.getElementById("round-info").innerHTML = `
     <div class="round-banner">
       <div style="display:flex;align-items:baseline;gap:0">
         <div class="round-label" style="margin-bottom:0;margin-right:12px">目前回合</div>
         <span class="round-num">${round+1}</span>
         <span style="font-size:18px;color:var(--muted);margin:0 6px;font-family:'DM Mono',monospace">／</span>
-        <span style="font-size:22px;color:var(--muted);font-family:'DM Mono',monospace;font-weight:500">${gameState.totalRounds||6}</span>
+        <span style="font-size:22px;color:var(--muted);font-family:'DM Mono',monospace;font-weight:500">${total}</span>
       </div>
       <div class="phase-badge phase-${phase}">${{waiting:"等待中",ordering:"收單中",settled:"已結算",ended:"結束"}[phase]||phase}</div>
     </div>`;
@@ -208,9 +209,10 @@ function renderRoundStatus() {
       }).join("")}</div>` : ""}
     </div>`;
 
+  const total      = gameState.totalRounds || parseInt(document.getElementById("set-total-rounds")?.value) || 6;
   const canCollect = (phase==="waiting" || phase==="settled") && gameState.started!==false;
   const canSettle  = (phase==="ordering");
-  const canNext    = (phase==="settled" && round < (gameState.totalRounds||6)-1);
+  const canNext    = (phase==="settled" && round < total - 1);
   document.getElementById("btn-collect").disabled = !canCollect;
   document.getElementById("btn-settle").disabled  = !canSettle;
   document.getElementById("btn-next").disabled    = !canNext;
@@ -349,12 +351,16 @@ window.settleRound = async function() {
 };
 
 window.nextRound = async function() {
-  const nextR = (gameState?.round||0)+1;
-  if (nextR >= (gameState?.totalRounds||6)) {
-    await update(ref(db,"game"), { phase:"ended" }); toast("遊戲結束！"); return;
+  const nextR   = (gameState?.round || 0) + 1;
+  const total   = gameState?.totalRounds || parseInt(document.getElementById("set-total-rounds")?.value) || 6;
+  if (nextR >= total) {
+    await update(ref(db,"game"), { phase:"ended" });
+    toast("遊戲結束！");
+    return;
   }
-  await update(ref(db,"game"), { round:nextR, phase:"waiting", news:roundConfig[nextR]||{} });
-  toast(`進入第 ${nextR+1} 回合`);
+  // 不預設 news，等老師按「開始收單」時才隨機抽題庫
+  await update(ref(db,"game"), { round:nextR, phase:"waiting" });
+  toast(`進入第 ${nextR+1} 回合，請按「開始收單」抽取新聞`);
 };
 
 window.endGame  = async () => { await update(ref(db,"game"),{phase:"ended"}); toast("已結束遊戲"); };
@@ -387,12 +393,32 @@ function renderPlayerManager() {
           <div class="player-total ${total>=INIT_CASH?"up":"dn"}">$${total.toFixed(0)}<br><small>${total>=INIT_CASH?"+":""}${pct}%</small></div>
           <div class="player-actions">
             <button class="btn-icon" onclick="editPlayerName('${uid}')" title="改名">✏️</button>
+            <button class="btn-icon" onclick="editPlayerCash('${uid}')" title="修改現金" style="color:var(--gold);border-color:rgba(240,185,66,.3)">💰</button>
             <button class="btn-icon btn-icon-red" onclick="deletePlayer('${uid}')" title="刪除">🗑</button>
           </div>
         </div>`;
       }).join("")
     : `<div class="empty-state">尚無學生登入</div>`;
 }
+
+window.editPlayerCash = async function(uid) {
+  const p = playersMap[uid];
+  if (!p) return;
+  const current = p.cash || 0;
+  const input   = prompt(`修改「${p.name}」的現金金額
+目前現金：$${current.toFixed(0)}
+
+請輸入新的現金金額：`, current.toFixed(0));
+  if (input === null) return;
+  const newCash = parseFloat(input);
+  if (isNaN(newCash) || newCash < 0) { alert("請輸入有效的金額（大於等於 0）"); return; }
+  // 重新計算總資產
+  const prices = gameState?.prices || {};
+  let total = newCash;
+  stockConfig.forEach(s => total += (p.stocks?.[s.id] || 0) * (prices[s.id] || s.initPrice));
+  await update(ref(db, `players/${uid}`), { cash: newCash, total: Math.round(total * 100) / 100 });
+  toast(`已將「${p.name}」的現金改為 $${newCash.toFixed(0)}`);
+};
 
 window.editPlayerName = async function(uid) {
   const p = playersMap[uid]; if (!p) return;
@@ -575,10 +601,10 @@ function renderRoundEditor() {
                       const v=+this.value;
                       roundConfig[${i}].trend=roundConfig[${i}].trend||{};
                       roundConfig[${i}].trend['${s.id}']=v/100;
-                      this.nextElementSibling.textContent = v===0 ? '' : (v>0?'+':'') + v + '%';
+                      this.nextElementSibling.textContent=(v>0?'+':'')+v+'%';
                       this.nextElementSibling.className='trend-val '+(v>0?'up':v<0?'dn':'neutral');
                     ">
-                  <span class="trend-val ${cls}" style="min-width:44px;text-align:left">${val===0?'':`${val>0?'+':''}${val}%`}</span>
+                  <span class="trend-val ${cls}" style="min-width:44px;text-align:left">${val>0?'+':''}${val}%</span>
                 </div>
               </div>
             </div>`;
