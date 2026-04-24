@@ -44,7 +44,8 @@ body {
   width:100%; max-width:340px;
   background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px;
 }
-.login-box input {
+.login-box input[type="text"],
+.login-box input[type="password"] {
   width:100%; background:var(--surface2); border:1px solid var(--border);
   border-radius:10px; padding:14px; color:var(--text); font-size:17px;
   font-family:'Noto Sans TC',sans-serif; text-align:center; outline:none;
@@ -297,6 +298,8 @@ body {
   <div class="login-sub">輸入你的名字，加入這場股市體驗。<br>同一名字可在不同裝置繼續使用。</div>
   <div class="login-box">
     <input type="text" id="input-name" placeholder="輸入你的名字…" maxlength="10" autocomplete="off">
+    <input type="password" id="input-password" placeholder="輸入遊戲密碼…" autocomplete="off" style="display:none">
+    <div id="login-error" style="font-size:12px;color:var(--red);text-align:center;margin-bottom:8px;display:none">密碼錯誤，請再試一次</div>
     <button id="btn-login">進入市場</button>
   </div>
 </div>
@@ -500,6 +503,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
 // 登入
 document.getElementById("btn-login").addEventListener("click", doLogin);
 document.getElementById("input-name").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+document.getElementById("input-password").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 
 async function doLogin() {
   const name = document.getElementById("input-name").value.trim();
@@ -509,6 +513,33 @@ async function doLogin() {
     setTimeout(() => el.classList.remove("shake"), 400);
     return;
   }
+
+  // 檢查是否有設定密碼
+  const pwSnap = await get(ref(db, "config/gamePassword"));
+  const gamePassword = pwSnap.exists() ? pwSnap.val() : "";
+
+  if (gamePassword) {
+    // 需要密碼：顯示密碼欄位
+    const pwInput = document.getElementById("input-password");
+    const pwErr   = document.getElementById("login-error");
+    if (pwInput.style.display === "none") {
+      // 第一次按：顯示密碼欄位
+      pwInput.style.display = "block";
+      pwInput.focus();
+      document.getElementById("btn-login").textContent = "確認登入";
+      return;
+    }
+    // 第二次按：驗證密碼
+    if (pwInput.value !== gamePassword) {
+      pwErr.style.display = "block";
+      pwInput.value = "";
+      pwInput.classList.add("shake");
+      setTimeout(() => pwInput.classList.remove("shake"), 400);
+      return;
+    }
+    document.getElementById("login-error").style.display = "none";
+  }
+
   uid    = "u_" + name.replace(/\s+/g,"_");
   myName = name;
   localStorage.setItem("stock_uid",  uid);
@@ -531,9 +562,9 @@ function renderGame() {
   const phase=gameState.phase||"waiting", round=gameState.round||0;
   const prices=gameState.prices||{}, news=gameState.news||{};
 
-  // 遊戲結束時切換到專屬結束畫面
+  // 遊戲結束時切換到專屬結束畫面（必須已登入）
   if (phase === "ended") {
-    showEnded();
+    if (uid && myName) showEnded();
     return;
   }
 
