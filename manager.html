@@ -31,6 +31,8 @@ let ordersMap   = {};
 let stockConfig = [];   // 從 Firebase 或預設值讀取
 let roundConfig = [];   // 回合新聞劇本（題庫）
 let usedNewsIdx = [];   // 已使用過的新聞索引（避免重複）
+let timerInterval = null; // 倒數計時器
+let timerPaused   = false;
 let activeTab   = 'dashboard';
 
 const DEFAULT_STOCKS = [
@@ -216,6 +218,31 @@ function renderRoundStatus() {
   document.getElementById("btn-settle").disabled  = !canSettle;
   document.getElementById("btn-next").disabled    = !canNext;
   document.getElementById("btn-end").disabled     = (phase==="ended");
+  const pauseBtn = document.getElementById("btn-pause");
+  if (pauseBtn) {
+    pauseBtn.disabled = (phase !== "ordering");
+    if (phase !== "ordering") {
+      pauseBtn.textContent = "暫停計時";
+      pauseBtn.style.background = "";
+      pauseBtn.style.color = "";
+    }
+  }
+  // 如果是收單中且有 deadline，啟動本地計時器（頁面重整後恢復）
+  if (phase === "ordering" && gameState.deadlineAt && !timerInterval) {
+    if (gameState.timerPaused) {
+      renderTimer(gameState.pausedSecsLeft || 0, true);
+      timerPaused = true;
+      if (pauseBtn) { pauseBtn.textContent = "繼續計時"; pauseBtn.style.background = "rgba(52,213,138,.15)"; pauseBtn.style.color = "var(--green)"; }
+    } else {
+      startLocalTimer(gameState.deadlineAt);
+    }
+  }
+  if (phase !== "ordering") {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    timerPaused = false;
+    renderTimer(0, false);
+  }
 }
 
 function renderOrders() {
@@ -276,11 +303,14 @@ window.collectOrders = async function() {
   if (news._idx !== undefined) usedNewsIdx.push(news._idx);
   const { _idx, roundMin, roundMax, ...cleanNews } = news;
 
-  // 儲存已用清單
+  // 儲存已用清單，並把倒數終止時間寫入 Firebase（讓學生端同步顯示）
+  const roundSecs = (gameState?.roundSeconds || 180);
+  const deadlineAt = Date.now() + roundSecs * 1000;
   await set(ref(db, "config/usedNewsIdx"), usedNewsIdx);
-  await update(ref(db,"game"), { phase:"ordering", news: cleanNews });
+  await update(ref(db,"game"), { phase:"ordering", news: cleanNews, deadlineAt, timerPaused: false });
   await set(ref(db,"orders"), null);
-  toast(`第 ${round+1} 回合開始收單！`);
+  startLocalTimer(deadlineAt);
+  toast(`第 ${round+1} 回合開始收單！倒數 ${roundSecs} 秒`);
 };
 
 window.settleRound = async function() {
@@ -343,9 +373,12 @@ window.settleRound = async function() {
 
   const priceHistory = { ...(gameState.priceHistory||{}) };
   priceHistory[round] = { ...newPrices };
+  clearInterval(timerInterval);
+  timerInterval = null;
   await update(ref(db,"players"), playerUpdates);
-  await update(ref(db,"game"), { prices:newPrices, priceHistory, phase:"settled", netBuy });
+  await update(ref(db,"game"), { prices:newPrices, priceHistory, phase:"settled", netBuy, deadlineAt:null });
   await set(ref(db,"orders"), null);
+  renderTimer(0, false);
   toast("結算完成！");
 };
 
@@ -646,10 +679,11 @@ window.saveSettings = async function() {
   const initCash    = parseInt(document.getElementById("set-init-cash").value)    || 10000;
   const totalRounds = parseInt(document.getElementById("set-total-rounds").value) || 6;
   const kFactor     = parseFloat(document.getElementById("set-k-factor").value)   || 0.5;
-  await update(ref(db,"game"), { initCash, totalRounds, kFactor });
-  // 立刻更新題庫介面的回合範圍上限
+  const roundMins   = parseFloat(document.getElementById("set-round-mins").value) || 3;
+  const roundSeconds = Math.round(roundMins * 60);
+  await update(ref(db,"game"), { initCash, totalRounds, kFactor, roundSeconds });
   renderRoundEditor();
-  toast("遊戲設定已儲存！回合數已更新為 " + totalRounds + " 回合。");
+  toast(`遊戲設定已儲存！每回合 ${roundMins} 分鐘（${roundSeconds} 秒）`);
 };
 
 window.saveRoundConfig = async function() {
@@ -670,6 +704,64 @@ window.saveRoundConfig = async function() {
   await saveConfig();
   renderRoundEditor();
   toast("新聞題庫已儲存！");
+};
+
+// ── 倒數計時器 ────────────────────────────────────────────
+function startLocalTimer(deadlineAt) {
+  clearInterval(timerInterval);
+  timerPaused = false;
+  timerInterval = setInterval(async () => {
+    if (timerPaused) return;
+    const secsLeft = Math.max(0, Math.round((deadlineAt - Date.now()) / 1000));
+    renderTimer(secsLeft, true);
+    if (secsLeft <= 0) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      toast("時間到！自動結算中…");
+      await settleRound();
+      if (gameState?.round < (gameState?.totalRounds || 6) - 1) {
+        setTimeout(() => nextRound(), 1500);
+      }
+    }
+  }, 500);
+}
+
+function renderTimer(secsLeft, running) {
+  const el = document.getElementById("timer-display");
+  if (!el) return;
+  const mins = Math.floor(secsLeft / 60).toString().padStart(2,"0");
+  const secs = (secsLeft % 60).toString().padStart(2,"0");
+  el.textContent = `${mins}:${secs}`;
+  const bar = document.getElementById("timer-bar");
+  const total = gameState?.roundSeconds || 180;
+  const pct = total > 0 ? (secsLeft / total * 100) : 0;
+  if (bar) {
+    bar.style.width = pct + "%";
+    bar.style.background = secsLeft <= 30 ? "var(--red)" : secsLeft <= 60 ? "var(--gold)" : "var(--green)";
+  }
+  const wrap = document.getElementById("timer-wrap");
+  if (wrap) wrap.style.display = running ? "block" : "none";
+}
+
+window.pauseTimer = async function() {
+  if (!gameState || gameState.phase !== "ordering") return;
+  timerPaused = !timerPaused;
+  const btn = document.getElementById("btn-pause");
+  if (timerPaused) {
+    // 把剩餘秒數存到 Firebase，讓學生端也暫停
+    const secsLeft = Math.max(0, Math.round((gameState.deadlineAt - Date.now()) / 1000));
+    await update(ref(db,"game"), { timerPaused: true, pausedSecsLeft: secsLeft });
+    if (btn) { btn.textContent = "繼續計時"; btn.style.background = "rgba(52,213,138,.15)"; btn.style.color = "var(--green)"; }
+    toast("計時器已暫停");
+  } else {
+    // 從暫停秒數重新設定 deadline
+    const secsLeft = gameState.pausedSecsLeft || 0;
+    const newDeadline = Date.now() + secsLeft * 1000;
+    await update(ref(db,"game"), { timerPaused: false, deadlineAt: newDeadline });
+    startLocalTimer(newDeadline);
+    if (btn) { btn.textContent = "暫停計時"; btn.style.background = ""; btn.style.color = ""; }
+    toast("計時器已繼續");
+  }
 };
 
 // ── Toast ─────────────────────────────────────────────────
@@ -879,9 +971,22 @@ button:disabled{opacity:.3;cursor:default}
   <div class="btn-row">
     <button class="btn-green" id="btn-collect" onclick="collectOrders()" disabled>開始收單</button>
     <button class="btn-green" id="btn-settle"  onclick="settleRound()"  disabled>結算回合</button>
+    <button id="btn-pause" onclick="pauseTimer()" disabled style="min-width:90px">暫停計時</button>
     <button id="btn-next" onclick="nextRound()" disabled>下一回合</button>
     <button id="btn-end"  onclick="endGame()">結束遊戲</button>
   </div>
+
+  <!-- 倒數計時器 -->
+  <div id="timer-wrap" style="display:none;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div class="section-title" style="margin-bottom:0">倒數計時</div>
+      <div id="timer-display" style="font-family:'DM Mono',monospace;font-size:36px;font-weight:700;color:var(--gold);letter-spacing:0.05em">00:00</div>
+    </div>
+    <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+      <div id="timer-bar" style="height:100%;width:100%;background:var(--green);border-radius:4px;transition:width .5s linear,background .5s"></div>
+    </div>
+  </div>
+
   <div style="margin-bottom:14px">
     <div class="section-title">當前回合新聞</div>
     <div id="cur-news-display"></div>
