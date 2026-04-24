@@ -265,6 +265,19 @@ body {
         <div class="news-title" id="news-title">等待老師發布新聞…</div>
         <div class="news-body"  id="news-body"></div>
       </div>
+      <!-- 倒數計時器 -->
+      <div id="student-timer-wrap" style="display:none;margin-bottom:14px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span id="student-timer-label" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:'DM Mono',monospace">⏱ 下單倒數</span>
+            <span id="student-timer-display" style="font-family:'DM Mono',monospace;font-size:32px;font-weight:700;color:var(--green);letter-spacing:0.05em">00:00</span>
+          </div>
+          <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+            <div id="student-timer-bar" style="height:100%;width:100%;background:var(--green);border-radius:3px;transition:width .5s linear,background .5s"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="sec-title">即時股價</div>
       <div class="price-grid" id="price-grid"></div>
     </div>
@@ -284,6 +297,9 @@ body {
     <div class="tab-panel" id="tab-trade">
       <div class="phase-msg" id="phase-msg">等待老師開始收單…</div>
       <div id="order-section" style="display:none">
+        <div id="trade-timer-row" style="text-align:center;font-family:'DM Mono',monospace;font-size:13px;color:var(--muted);margin-bottom:10px;padding:6px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+          剩餘時間：<span id="student-timer-display2" style="font-weight:700;color:var(--green)">—</span>
+        </div>
         <div id="order-cards"></div>
         <div class="preview-bar" id="preview-bar">下單後現金：—</div>
         <div class="submit-row">
@@ -332,6 +348,7 @@ const db  = getDatabase(app);
 let uid = localStorage.getItem("stock_uid");
 let myName = localStorage.getItem("stock_name");
 let gameState = null, myData = null, allPlayers = {}, stockConfig = [], submitted = false;
+let studentTimer = null;
 
 async function boot() {
   await loadStocks();
@@ -462,6 +479,26 @@ function renderGame() {
   }[phase]||"";
   if (phase==="waiting") submitted=false;
   document.getElementById("btn-submit").disabled = submitted||!canOrder;
+
+  // 倒數計時器同步
+  const timerWrap = document.getElementById("student-timer-wrap");
+  if (phase==="ordering" && gameState.deadlineAt) {
+    if (timerWrap) timerWrap.style.display = "block";
+    clearInterval(studentTimer);
+    if (gameState.timerPaused) {
+      renderStudentTimer(gameState.pausedSecsLeft || 0, true, true);
+    } else {
+      studentTimer = setInterval(() => {
+        const secsLeft = Math.max(0, Math.round((gameState.deadlineAt - Date.now()) / 1000));
+        renderStudentTimer(secsLeft, true, false);
+        if (secsLeft <= 0) { clearInterval(studentTimer); }
+      }, 500);
+    }
+  } else {
+    if (timerWrap) timerWrap.style.display = "none";
+    clearInterval(studentTimer);
+  }
+
   renderAsset();
 }
 
@@ -582,6 +619,32 @@ function toast(msg,type="ok"){
   const t=document.getElementById("toast");
   t.textContent=msg; t.className="show"+(type==="error"?" error":"");
   clearTimeout(t._t); t._t=setTimeout(()=>t.className="",2800);
+}
+
+function renderStudentTimer(secsLeft, show, paused) {
+  const el  = document.getElementById("student-timer-display");
+  const bar = document.getElementById("student-timer-bar");
+  const lbl = document.getElementById("student-timer-label");
+  if (!el) return;
+  const mins = Math.floor(secsLeft/60).toString().padStart(2,"0");
+  const secs = (secsLeft%60).toString().padStart(2,"0");
+  el.textContent = `${mins}:${secs}`;
+  el.style.color = secsLeft<=30?"var(--red)":secsLeft<=60?"var(--gold)":"var(--green)";
+  if (lbl) lbl.textContent = paused ? "⏸ 計時暫停" : "⏱ 下單倒數";
+  const total = gameState?.roundSeconds || 180;
+  const pct   = total > 0 ? (secsLeft/total*100) : 0;
+  if (bar) {
+    bar.style.width = pct+"%";
+    bar.style.background = secsLeft<=30?"var(--red)":secsLeft<=60?"var(--gold)":"var(--green)";
+  }
+  // 同步更新交易頁面的小計時器
+  const el2 = document.getElementById("student-timer-display2");
+  if (el2) {
+    const mins2 = Math.floor(secsLeft/60).toString().padStart(2,"0");
+    const secs2 = (secsLeft%60).toString().padStart(2,"0");
+    el2.textContent = paused ? "暫停中" : `${mins2}:${secs2}`;
+    el2.style.color = paused?"var(--muted)":secsLeft<=30?"var(--red)":secsLeft<=60?"var(--gold)":"var(--green)";
+  }
 }
 
 boot();
