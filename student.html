@@ -229,6 +229,62 @@ body {
 #toast.show       { opacity:1; transform:translateX(-50%) translateY(0); }
 #toast.show.error { background:var(--red); }
 .empty-state { text-align:center; padding:24px; color:var(--muted); font-size:13px; }
+
+/* ══ 遊戲結束畫面 ══ */
+#screen-ended {
+  flex:1; flex-direction:column;
+  overflow-y:auto; -webkit-overflow-scrolling:touch;
+  background:var(--bg);
+}
+.ended-hero {
+  background:linear-gradient(160deg,#1a1d27 0%,#0f1117 100%);
+  border-bottom:1px solid var(--border);
+  padding:36px 24px 28px; text-align:center;
+}
+.ended-emoji { font-size:56px; line-height:1; margin-bottom:14px; }
+.ended-title { font-size:26px; font-weight:700; color:var(--gold); margin-bottom:6px; }
+.ended-sub   { font-size:13px; color:var(--muted); line-height:1.6; }
+.ended-body  { padding:16px 16px 60px; }
+.final-my-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:22px 18px; margin-bottom:16px;
+  text-align:center; position:relative; overflow:hidden;
+}
+.final-my-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:3px;
+  background:linear-gradient(90deg,var(--gold),var(--accent));
+}
+.final-my-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-family:'DM Mono',monospace; margin-bottom:8px; }
+.final-my-name  { font-size:20px; font-weight:700; color:var(--text); margin-bottom:14px; }
+.final-my-total { font-size:40px; font-weight:700; font-family:'DM Mono',monospace; line-height:1; margin-bottom:4px; }
+.final-my-pct   { font-size:16px; font-weight:600; margin-bottom:14px; }
+.final-rank-badge {
+  display:inline-block; font-size:14px; font-weight:700;
+  padding:6px 20px; border-radius:20px;
+  background:rgba(240,185,66,.12); color:var(--gold);
+  border:1px solid rgba(240,185,66,.3); font-family:'DM Mono',monospace;
+}
+.final-lb-title {
+  font-size:11px; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.1em; font-family:'DM Mono',monospace;
+  display:flex; align-items:center; gap:6px; margin-bottom:10px;
+}
+.final-lb-title::before {
+  content:''; display:inline-block; width:3px; height:11px;
+  background:var(--gold); border-radius:2px;
+}
+.final-lb-row {
+  display:flex; align-items:center; gap:10px; padding:12px 14px;
+  border-radius:10px; margin-bottom:6px;
+  background:var(--surface); border:1px solid var(--border);
+}
+.final-lb-row.me   { border-color:var(--accent); background:rgba(61,92,245,.08); }
+.final-lb-row.gold { border-color:rgba(240,185,66,.5); background:rgba(240,185,66,.05); }
+.final-lb-rank  { font-size:22px; min-width:36px; text-align:center; }
+.final-lb-name  { flex:1; font-size:14px; font-weight:500; }
+.final-lb-right { text-align:right; }
+.final-lb-total { font-size:15px; font-weight:700; font-family:'DM Mono',monospace; }
+.final-lb-pct   { font-size:12px; font-weight:600; }
 @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
 </style>
 </head>
@@ -324,23 +380,29 @@ body {
 </div>
 
 <!-- 遊戲結束畫面 -->
-<div id="screen-ended">
+<div id="screen-ended" style="display:none">
   <div class="ended-hero">
-    <div class="ended-emoji">🏁</div>
+    <div class="ended-emoji">🏆</div>
     <div class="ended-title">遊戲結束！</div>
-    <div class="ended-sub">感謝你的參與，以下是最終結果</div>
+    <div class="ended-sub">
+      感謝你的參與 🎉<br>
+      以下是你這場的最終成績
+    </div>
   </div>
   <div class="ended-body">
     <!-- 我的成績 -->
     <div class="final-my-card">
-      <div class="final-my-label">我的最終成績</div>
+      <div class="final-my-label">💼 我的最終成績</div>
       <div class="final-my-name"  id="ended-my-name">—</div>
       <div class="final-my-total" id="ended-my-total">$—</div>
       <div class="final-my-pct"   id="ended-my-pct">—</div>
-      <div class="final-rank-badge" id="ended-my-rank">排名 —</div>
+      <div style="margin:12px 0">
+        <div class="final-rank-badge" id="ended-my-rank">排名 —</div>
+      </div>
+      <div id="ended-my-detail" style="margin-top:14px;background:var(--surface2);border-radius:8px;padding:10px 12px;text-align:left;font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;line-height:2"></div>
     </div>
     <!-- 全班排行 -->
-    <div class="final-lb-title">最終排行榜</div>
+    <div class="final-lb-title">🏅 最終排行榜</div>
     <div id="final-leaderboard"><div class="empty-state">載入中…</div></div>
   </div>
 </div>
@@ -675,14 +737,32 @@ function renderFinalLeaderboard() {
   const myRank = sorted.findIndex(p => p.isMe) + 1;
   const me     = sorted.find(p => p.isMe);
   if (me) {
-    const pct = ((me.total - INIT) / INIT * 100).toFixed(1);
-    const up  = me.total >= INIT;
+    const pct  = ((me.total - INIT) / INIT * 100).toFixed(1);
+    const up   = me.total >= INIT;
+    const myP  = allPlayers[uid] || {};
+    const prices = gameState?.prices || {};
     document.getElementById("ended-my-name").textContent  = me.name;
     document.getElementById("ended-my-total").textContent = "$" + me.total.toFixed(0);
     document.getElementById("ended-my-total").className   = "final-my-total " + (up ? "up" : "dn");
     document.getElementById("ended-my-pct").textContent   = (up ? "+" : "") + pct + "%";
     document.getElementById("ended-my-pct").className     = "final-my-pct " + (up ? "up" : "dn");
-    document.getElementById("ended-my-rank").textContent  = `第 ${myRank} 名 / 共 ${sorted.length} 人`;
+    // 排名 emoji
+    const rankEmojis = ["🥇","🥈","🥉"];
+    const rankLabel  = rankEmojis[myRank-1] || `第 ${myRank} 名`;
+    document.getElementById("ended-my-rank").textContent  = `${rankLabel}　共 ${sorted.length} 人`;
+    // 資產明細
+    const detailEl = document.getElementById("ended-my-detail");
+    if (detailEl) {
+      const cash = myP.cash || 0;
+      let rows = stockConfig.map(s => {
+        const qty = myP.stocks?.[s.id] || 0;
+        const val = qty * (prices[s.id] || s.initPrice);
+        return qty > 0 ? `${s.name}：${qty} 股　$${val.toFixed(0)}` : null;
+      }).filter(Boolean).join("
+");
+      detailEl.innerHTML = `現金：$${cash.toFixed(0)}` + (rows ? `<br>${rows.replace(/
+/g,"<br>")}` : "");
+    }
   }
 
   // 全班排行
