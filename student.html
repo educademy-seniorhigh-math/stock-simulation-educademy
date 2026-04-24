@@ -7,9 +7,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html { height: 100%; }
+html, body { height: 100%; }
 body {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   background: #0f1117;
@@ -18,6 +18,7 @@ body {
   font-size: 14px;
   max-width: 520px;
   margin: 0 auto;
+  width: 100%;
 }
 :root {
   --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a; --border:#2e3347;
@@ -30,6 +31,7 @@ body {
 /* ══ 登入 ══ */
 #screen-login {
   flex: 1;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -436,9 +438,17 @@ let uid = localStorage.getItem("stock_uid");
 let myName = localStorage.getItem("stock_name");
 let gameState = null, myData = null, allPlayers = {}, stockConfig = [], submitted = false;
 let studentTimer = null;
+let gamePassword = ""; // 頁面載入時從 Firebase 讀一次，之後用記憶體比對
 
 async function boot() {
   await loadStocks();
+  // 一次性載入密碼到記憶體，避免每次按登入都查 Firebase
+  try {
+    const pwSnap = await get(ref(db, "config/gamePassword"));
+    gamePassword = (pwSnap.exists() && pwSnap.val()) ? pwSnap.val() : "";
+  } catch(e) {
+    gamePassword = "";
+  }
   if (uid && myName) {
     document.getElementById("topbar-name").textContent = myName;
     await joinGame();
@@ -503,9 +513,9 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
 // 登入
 document.getElementById("btn-login").addEventListener("click", doLogin);
 document.getElementById("input-name").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
-document.getElementById("input-password").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+// input-password Enter 在顯示後才綁定
 
-async function doLogin() {
+function doLogin() {
   const name = document.getElementById("input-name").value.trim();
   if (!name) {
     const el = document.getElementById("input-name");
@@ -514,22 +524,18 @@ async function doLogin() {
     return;
   }
 
-  // 檢查是否有設定密碼
-  const pwSnap = await get(ref(db, "config/gamePassword"));
-  const gamePassword = pwSnap.exists() ? pwSnap.val() : "";
-
   if (gamePassword) {
-    // 需要密碼：顯示密碼欄位
     const pwInput = document.getElementById("input-password");
     const pwErr   = document.getElementById("login-error");
+    // 第一次按：顯示密碼欄位
     if (pwInput.style.display === "none") {
-      // 第一次按：顯示密碼欄位
       pwInput.style.display = "block";
       pwInput.focus();
+      pwInput.onkeydown = e => { if(e.key==="Enter") doLogin(); };
       document.getElementById("btn-login").textContent = "確認登入";
       return;
     }
-    // 第二次按：驗證密碼
+    // 第二次按：比對密碼（用記憶體，不查 Firebase）
     if (pwInput.value !== gamePassword) {
       pwErr.style.display = "block";
       pwInput.value = "";
@@ -537,7 +543,7 @@ async function doLogin() {
       setTimeout(() => pwInput.classList.remove("shake"), 400);
       return;
     }
-    document.getElementById("login-error").style.display = "none";
+    pwErr.style.display = "none";
   }
 
   uid    = "u_" + name.replace(/\s+/g,"_");
@@ -545,9 +551,7 @@ async function doLogin() {
   localStorage.setItem("stock_uid",  uid);
   localStorage.setItem("stock_name", myName);
   document.getElementById("topbar-name").textContent = myName;
-  await joinGame();
-  showGame();
-  listenAll();
+  joinGame().then(() => { showGame(); listenAll(); });
 }
 
 document.getElementById("btn-logout").addEventListener("click", () => {
