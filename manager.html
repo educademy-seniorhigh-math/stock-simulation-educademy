@@ -209,7 +209,6 @@ function renderRoundStatus() {
       }).join("")}</div>` : ""}
     </div>`;
 
-  const total      = gameState.totalRounds || parseInt(document.getElementById("set-total-rounds")?.value) || 6;
   const canCollect = (phase==="waiting" || phase==="settled") && gameState.started!==false;
   const canSettle  = (phase==="ordering");
   const canNext    = (phase==="settled" && round < total - 1);
