@@ -323,6 +323,28 @@ body {
   </nav>
 </div>
 
+<!-- 遊戲結束畫面 -->
+<div id="screen-ended">
+  <div class="ended-hero">
+    <div class="ended-emoji">🏁</div>
+    <div class="ended-title">遊戲結束！</div>
+    <div class="ended-sub">感謝你的參與，以下是最終結果</div>
+  </div>
+  <div class="ended-body">
+    <!-- 我的成績 -->
+    <div class="final-my-card">
+      <div class="final-my-label">我的最終成績</div>
+      <div class="final-my-name"  id="ended-my-name">—</div>
+      <div class="final-my-total" id="ended-my-total">$—</div>
+      <div class="final-my-pct"   id="ended-my-pct">—</div>
+      <div class="final-rank-badge" id="ended-my-rank">排名 —</div>
+    </div>
+    <!-- 全班排行 -->
+    <div class="final-lb-title">最終排行榜</div>
+    <div id="final-leaderboard"><div class="empty-state">載入中…</div></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script type="module">
@@ -384,7 +406,11 @@ async function joinGame() {
 function listenAll() {
   onValue(ref(db,"game"),           s => { gameState=s.val(); renderGame(); });
   onValue(ref(db,`players/${uid}`), s => { myData=s.val(); renderAsset(); calcPreview(); });
-  onValue(ref(db,"players"),        s => { allPlayers=s.val()||{}; renderLeaderboard(); });
+  onValue(ref(db,"players"),        s => {
+    allPlayers=s.val()||{};
+    renderLeaderboard();
+    if (document.getElementById("screen-ended").style.display === "flex") renderFinalLeaderboard();
+  });
   onValue(ref(db,"config/stocks"),  s => { if(s.exists()){ stockConfig=s.val(); renderOrderCards(); }});
 }
 
@@ -442,6 +468,12 @@ function renderGame() {
   if (!gameState) return;
   const phase=gameState.phase||"waiting", round=gameState.round||0;
   const prices=gameState.prices||{}, news=gameState.news||{};
+
+  // 遊戲結束時切換到專屬結束畫面
+  if (phase === "ended") {
+    showEnded();
+    return;
+  }
 
   document.getElementById("topbar-round").textContent = `第 ${round+1} 回合`;
   const ph = document.getElementById("topbar-phase");
@@ -619,6 +651,56 @@ function toast(msg,type="ok"){
   const t=document.getElementById("toast");
   t.textContent=msg; t.className="show"+(type==="error"?" error":"");
   clearTimeout(t._t); t._t=setTimeout(()=>t.className="",2800);
+}
+
+function showEnded() {
+  document.getElementById("screen-login").style.display = "none";
+  document.getElementById("screen-game").style.display  = "none";
+  document.getElementById("screen-ended").style.display = "flex";
+  renderFinalLeaderboard();
+}
+
+function renderFinalLeaderboard() {
+  const prices  = gameState?.prices || {};
+  const INIT    = 10000;
+
+  // 計算所有人最終資產
+  const sorted = Object.entries(allPlayers).map(([id, p]) => {
+    let total = p.cash || 0;
+    stockConfig.forEach(s => total += (p.stocks?.[s.id]||0) * (prices[s.id]||s.initPrice));
+    return { name: p.name || id.slice(0,6), total, isMe: id === uid };
+  }).sort((a, b) => b.total - a.total);
+
+  // 我的排名
+  const myRank = sorted.findIndex(p => p.isMe) + 1;
+  const me     = sorted.find(p => p.isMe);
+  if (me) {
+    const pct = ((me.total - INIT) / INIT * 100).toFixed(1);
+    const up  = me.total >= INIT;
+    document.getElementById("ended-my-name").textContent  = me.name;
+    document.getElementById("ended-my-total").textContent = "$" + me.total.toFixed(0);
+    document.getElementById("ended-my-total").className   = "final-my-total " + (up ? "up" : "dn");
+    document.getElementById("ended-my-pct").textContent   = (up ? "+" : "") + pct + "%";
+    document.getElementById("ended-my-pct").className     = "final-my-pct " + (up ? "up" : "dn");
+    document.getElementById("ended-my-rank").textContent  = `第 ${myRank} 名 / 共 ${sorted.length} 人`;
+  }
+
+  // 全班排行
+  const medals = ["🥇","🥈","🥉"];
+  const confetti = ["🎊","🎉","✨"];
+  document.getElementById("final-leaderboard").innerHTML = sorted.map((p, i) => {
+    const pct  = ((p.total - INIT) / INIT * 100).toFixed(1);
+    const up   = p.total >= INIT;
+    const isGold = i === 0;
+    return `<div class="final-lb-row ${p.isMe ? "me" : ""} ${isGold ? "gold" : ""}">
+      <div class="final-lb-rank">${medals[i] || (i + 1)}</div>
+      <div class="final-lb-name">${p.name}${p.isMe ? " ✦" : ""}${isGold ? " " + (confetti[0]||"") : ""}</div>
+      <div class="final-lb-right">
+        <div class="final-lb-total ${up ? "up" : "dn"}">$${p.total.toFixed(0)}</div>
+        <div class="final-lb-pct   ${up ? "up" : "dn"}">${up ? "+" : ""}${pct}%</div>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function renderStudentTimer(secsLeft, show, paused) {
